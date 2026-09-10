@@ -164,9 +164,9 @@ export default function DisasterMap() {
     }
   }, [mode]);
 
-  function updateAreaDate(id, newDate) {
+  function updateArea(id, updates) {
     setAreas((prev) =>
-      prev.map((area) => (area.id === id ? { ...area, date: newDate } : area))
+      prev.map((area) => (area.id === id ? { ...area, ...updates } : area))
     );
   }
 
@@ -190,6 +190,9 @@ export default function DisasterMap() {
   }
 
   function clearAll() {
+    if (!window.confirm("Are you sure you want to clear all pins? All data will be gone and there is no way to restore it.")) {
+      return;
+    }
     setAreas([]);
     setCenter(null);
     setLiveRadius(0);
@@ -255,10 +258,18 @@ export default function DisasterMap() {
                 <Marker
                   position={area.center}
                   title={`Pin ${index + 1}`}
-                  onClick={() => {
-                    if (selectedAreaId === area.id) {
-                      setMode("EDITING");
+                  draggable={mode === "EDITING" && selectedAreaId === area.id}
+                  onDragEnd={(e) => {
+                    const newPos = e.latLng;
+                    if (newPos) {
+                      updateArea(area.id, {
+                        center: { lat: newPos.lat(), lng: newPos.lng() },
+                      });
                     }
+                  }}
+                  onClick={() => {
+                    setSelectedAreaId(area.id);
+                    setMode("EDITING");
                   }}
                 />
                 <Circle
@@ -293,6 +304,12 @@ export default function DisasterMap() {
               >
                 📍 {mode !== "IDLE" ? "Add Pin ON" : "Add Pin"}
               </button>
+              <button className="convert-btn" onClick={() => alert("Pencil tool feature coming soon!")}>
+                ✏️ Pencil Tool
+              </button>
+              <button className="convert-btn" onClick={() => alert("Conversion feature coming soon!")}>
+                Convert →
+              </button>
               <button className="secondary" onClick={clearAll}>
                 Clear All
               </button>
@@ -301,11 +318,11 @@ export default function DisasterMap() {
 
           <div className="status">
             <div className="status-text">
-              {mode === "IDLE" && !selectedAreaId && "Turn on Add Pin, then click anywhere on the map."}
-              {mode === "IDLE" && selectedAreaId && "Pin selected. Click the pin on the map to change its radius."}
+              {mode === "IDLE" && !selectedAreaId && "Turn on Add Pin to create a new area, or click any pin on the map to edit it."}
+              {mode === "IDLE" && selectedAreaId && "Pin selected."}
               {mode === "PLACING" && "Click the map to place the center of a new area."}
               {mode === "DRAWING" && `Move the cursor to stretch the radius. Current radius: ${(liveRadius / 1000).toFixed(3)} km`}
-              {mode === "EDITING" && `Adjusting radius. Click the map to save. Current radius: ${(liveRadius / 1000).toFixed(3)} km`}
+              {mode === "EDITING" && `Adjusting pin. Drag to move or move mouse to change radius. Click map to save. Current radius: ${(liveRadius / 1000).toFixed(3)} km`}
             </div>
           </div>
 
@@ -350,28 +367,85 @@ export default function DisasterMap() {
                   areas.map((area, index) => (
                     <tr
                       key={area.id}
-                      onClick={() => setSelectedAreaId(area.id)}
                       style={{
                         backgroundColor: selectedAreaId === area.id ? "#e0f2fe" : "transparent",
-                        cursor: "pointer",
+                        cursor: "default",
                       }}
                     >
-                      <td>Pin {index + 1}</td>
+                      <td>
+                        <input
+                          type="text"
+                          className="table-text-input"
+                          value={area.name || `Pin ${index + 1}`}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => updateArea(area.id, { name: e.target.value })}
+                        />
+                      </td>
                       <td>
                         <input
                           type="date"
                           className="table-date-input"
                           value={area.date}
                           onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => updateAreaDate(area.id, e.target.value)}
+                          onChange={(e) => updateArea(area.id, { date: e.target.value })}
                         />
                       </td>
-                      <td>{area.center?.lat?.toFixed(6) ?? "N/A"}</td>
-                      <td>{area.center?.lng?.toFixed(6) ?? "N/A"}</td>
                       <td>
-                        {(area.radiusMeters ? area.radiusMeters / 1000 : 0).toFixed(3)}
+                        <input
+                          type="number"
+                          className="table-num-input"
+                          value={area.center?.lat?.toFixed(6) ?? ""}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val)) {
+                              updateArea(area.id, { center: { ...area.center, lat: val } });
+                            }
+                          }}
+                        />
                       </td>
-                      <td>{area.radiusMeters?.toFixed(2) ?? "N/A"}</td>
+                      <td>
+                        <input
+                          type="number"
+                          className="table-num-input"
+                          value={area.center?.lng?.toFixed(6) ?? ""}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val)) {
+                              updateArea(area.id, { center: { ...area.center, lng: val } });
+                            }
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          className="table-num-input"
+                          value={(area.radiusMeters ? area.radiusMeters / 1000 : 0).toFixed(3)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val)) {
+                              updateArea(area.id, { radiusMeters: val * 1000 });
+                            }
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          className="table-num-input"
+                          value={area.radiusMeters?.toFixed(2) ?? ""}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val)) {
+                              updateArea(area.id, { radiusMeters: val });
+                            }
+                          }}
+                        />
+                      </td>
                       <td>
                         <button
                           className="delete-btn"
