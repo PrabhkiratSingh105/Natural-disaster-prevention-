@@ -411,14 +411,7 @@ export default function DisasterMap() {
         </section>
 
         <section className="panel">
-          <div className="status">
-            <div className="status-text">
-              {mode === "IDLE" && selectedAreaId && "Pin selected."}
-              {mode === "PLACING" && "Click the map to place the center of a new area."}
-              {mode === "DRAWING" && `Move the cursor to stretch the radius. Current radius: ${(liveRadius / 1000).toFixed(3)} km`}
-              {mode === "EDITING" && `Adjusting pin. Drag to move or move mouse to change radius. Click map to save. Current radius: ${(liveRadius / 1000).toFixed(3)} km`}
-            </div>
-          </div>
+          
 
           {(mode === "DRAWING" || mode === "EDITING") && (
             <div className="creation-controls">
@@ -450,7 +443,7 @@ export default function DisasterMap() {
                   <th>Radius (km)</th>
                   <th>Radius (m)</th>
                   <th>Action</th>
-                  <th className="collapse-indicator">{isTableCollapsed ? "展开 ▽" : "收起  △"}</th>
+                  <th className="collapse-indicator">{isTableCollapsed ? "Expand" : "Collapse"}</th>
                 </tr>
               </thead>
               {!isTableCollapsed && (
