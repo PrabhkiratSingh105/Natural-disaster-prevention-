@@ -9,6 +9,10 @@
   --danger-hover: #b91c1c;
   --secondary: #64748b;
   --secondary-hover: #475569;
+  --accent-pencil: #f59e0b;
+  --accent-pencil-hover: #d97706;
+  --accent-convert: #10b981;
+  --accent-convert-hover: #059669;
   --bg-main: #f8fafc;
   --bg-panel: #ffffff;
   --text-main: #1e293b;
@@ -47,6 +51,59 @@ input {
   min-height: 500px;
   width: 100%;
   border-bottom: 1px solid var(--border-color);
+  position: relative;
+}
+
+.floating-menu {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 10;
+  background: white;
+  padding: 12px;
+  border-radius: 24px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color);
+}
+
+.menu-item {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.menu-item:hover {
+  background: #f1f5f9;
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.delete-drag-handle {
+  cursor: grab;
+  user-select: none;
+}
+
+.delete-drag-handle.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+.menu-item.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
 }
 
 .map {
@@ -56,7 +113,7 @@ input {
 
 .panel {
   background: var(--bg-panel);
-  padding: 24px;
+  padding: 12px 24px;
   box-shadow: 0 -10px 25px -5px rgba(0, 0, 0, 0.05);
   position: relative;
   z-index: 2;
@@ -90,20 +147,22 @@ p {
 
 .actions {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 button {
   border: 0;
   border-radius: 8px;
-  padding: 10px 16px;
+  padding: 8px 12px;
   cursor: pointer;
   font-weight: 500;
-  font-size: 14px;
+  font-size: 13px;
   transition: all 0.2s ease;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .primary {
@@ -126,15 +185,26 @@ button {
   background: var(--danger-hover);
 }
 
+.pencil-btn {
+  background: var(--accent-pencil);
+  color: white;
+  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.2);
+}
+
+.pencil-btn:hover {
+  background: var(--accent-pencil-hover);
+  transform: translateY(-1px);
+}
+
 .convert-btn {
-  background: #f1f5f9;
-  color: var(--text-main);
-  border: 1px solid var(--border-color);
+  background: var(--accent-convert);
+  color: white;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
 }
 
 .convert-btn:hover {
-  background: #e2e8f0;
-  border-color: #cbd5e1;
+  background: var(--accent-convert-hover);
+  transform: translateY(-1px);
 }
 
 .secondary {
@@ -148,8 +218,8 @@ button {
 }
 
 .status {
-  margin-bottom: 20px;
-  padding: 12px 16px;
+  margin-bottom: 12px;
+  padding: 8px 16px;
   border-radius: var(--radius);
   background: #f8fafc;
   border: 1px solid var(--border-color);
@@ -158,6 +228,16 @@ button {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.dragging-delete-icon {
+  position: fixed;
+  pointer-events: none;
+  z-index: 1000;
+  font-size: 24px;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+  transition: transform 0.1s ease;
 }
 
 .status-text {
@@ -201,6 +281,26 @@ button {
   overflow: hidden;
   background: white;
   box-shadow: var(--shadow);
+  transition: all 0.3s ease-in-out;
+}
+
+.table-wrap.collapsed {
+  max-height: 50px;
+  overflow: hidden;
+}
+
+.collapsible-header {
+  transition: background 0.2s ease;
+}
+
+.collapsible-header:hover {
+  background: #f1f5f9;
+}
+
+.collapse-indicator {
+  text-align: center;
+  font-weight: bold;
+  color: var(--text-muted);
 }
 
 table {

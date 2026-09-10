@@ -34,6 +34,33 @@ function distanceMeters(a, b) {
   return 2 * earthRadius * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
+function findAreaAtDrop(projection, areas, dropLatLng, dropPixel) {
+  let bestId = null;
+  let bestScore = Infinity;
+
+  areas.forEach((area) => {
+    const dist = distanceMeters(area.center, dropLatLng);
+    const contains = dist <= (area.radiusMeters || 0);
+    const pinPixel = projection.fromLatLngToContainerPixel(
+      new google.maps.LatLng(area.center.lat, area.center.lng)
+    );
+    const pixelDist = pinPixel
+      ? Math.hypot(dropPixel.x - pinPixel.x, dropPixel.y - pinPixel.y)
+      : Infinity;
+    const onPin = pixelDist <= 28;
+
+    if (!contains && !onPin) return;
+
+    const score = contains ? area.radiusMeters : dist;
+    if (score < bestScore) {
+      bestScore = score;
+      bestId = area.id;
+    }
+  });
+
+  return bestId;
+}
+
 function todayString() {
   const now = new Date();
   const year = now.getFullYear();
@@ -70,7 +97,6 @@ function MapEvents({
         setLiveRadius(0);
         setMode("DRAWING");
       } else if (mode === "DRAWING") {
-        // New pin case
         if (center) {
           const radiusMeters = distanceMeters(center, coords);
           setAreas((prev) => [
@@ -89,25 +115,6 @@ function MapEvents({
       } else if (mode === "EDITING") {
         const areaToEdit = areas.find((a) => a.id === selectedAreaId);
         if (areaToEdit) {
-          // If we are in EDITING mode, the click on map FINALIZES the change.
-          // The user specified they want to be able to transfer location OR change radius.
-          // My previous implementation only did radius.
-          // To allow location transfer, the 'EDITING' mode should probably start by allowing
-          // the user to drag the pin, or we use a different logic.
-          // However, the prompt says "if we click that pin... we can change the length".
-          // I will now implement the "transfer location" by allowing the user to click a new center
-          // if they are in a specific "MOVE" mode, but for now, I'll keep the radius edit as requested
-          // and add a way to move it.
-
-          // Let's refine EDITING:
-          // 1. User selects pin in table.
-          // 2. User clicks pin on map -> enters EDITING mode.
-          // 3. In EDITING mode, move mouse -> updates radius.
-          // 4. Click map -> saves radius.
-
-          // To implement "transfer location":
-          // I'll add a "MOVE" mode.
-
           const radiusMeters = distanceMeters(areaToEdit.center, coords);
           setAreas((prev) =>
             prev.map((a) => (a.id === selectedAreaId ? { ...a, radiusMeters } : a))
@@ -143,6 +150,62 @@ function MapEvents({
   return null;
 }
 
+function DragDropManager({ isDraggingDelete, setIsDraggingDelete, areas, deleteArea }) {
+  const map = useMap();
+  const overlayRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const overlay = new google.maps.OverlayView();
+    overlay.draw = () => {};
+    overlay.setMap(map);
+    overlayRef.current = overlay;
+
+    return () => {
+      overlay.setMap(null);
+      overlayRef.current = null;
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!isDraggingDelete) return;
+
+    const handleMouseUp = (e) => {
+      try {
+        const projection = overlayRef.current?.getProjection();
+        const mapDiv = map?.getDiv();
+        if (projection && mapDiv) {
+          const rect = mapDiv.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const insideMap = x >= 0 && y >= 0 && x <= rect.width && y <= rect.height;
+
+          if (insideMap) {
+            const latLng = projection.fromContainerPixelToLatLng(
+              new google.maps.Point(x, y)
+            );
+            if (latLng) {
+              const dropLatLng = { lat: latLng.lat(), lng: latLng.lng() };
+              const areaToDelete = findAreaAtDrop(projection, areas, dropLatLng, { x, y });
+              if (areaToDelete) {
+                deleteArea(areaToDelete);
+              }
+            }
+          }
+        }
+      } finally {
+        setIsDraggingDelete(false);
+      }
+    };
+
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, [isDraggingDelete, map, areas, deleteArea, setIsDraggingDelete]);
+
+  return null;
+}
+
 export default function DisasterMap() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -153,6 +216,9 @@ export default function DisasterMap() {
   const [selectedAreaId, setSelectedAreaId] = useState(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [areas, setAreas] = useState([]);
+  const [isTableCollapsed, setIsTableCollapsed] = useState(false);
+  const [isDraggingDelete, setIsDraggingDelete] = useState(false);
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     setSelectedDate(todayString());
@@ -163,6 +229,16 @@ export default function DisasterMap() {
       setSelectedAreaId(null);
     }
   }, [mode]);
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (isDraggingDelete) {
+        setDragPos({ x: e.clientX, y: e.clientY });
+      }
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, [isDraggingDelete]);
 
   function updateArea(id, updates) {
     setAreas((prev) =>
@@ -217,6 +293,47 @@ export default function DisasterMap() {
     <APIProvider apiKey={apiKey}>
       <main className="app">
         <section className="map-section">
+          <div className="floating-menu">
+            <button
+              className={`menu-item ${mode !== "IDLE" ? "active" : ""}`}
+              onClick={() => {
+                if (mode === "IDLE") setMode("PLACING");
+                else setMode("IDLE");
+              }}
+              title="Add Pin"
+            >
+              📍
+            </button>
+            <button className="menu-item" onClick={() => alert("Search feature coming soon!")} title="Search">
+              🔍
+            </button>
+            <button className="menu-item" onClick={() => alert("Submission feature coming soon!")} title="Submit">
+              ✅
+            </button>
+            <button
+              type="button"
+              className={`menu-item delete-drag-handle ${isDraggingDelete ? "dragging" : ""}`}
+              draggable={false}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setIsDraggingDelete(true);
+                setDragPos({ x: e.clientX, y: e.clientY });
+              }}
+              title="Drag to delete a pin"
+            >
+              🗑️
+            </button>
+          </div>
+
+          {isDraggingDelete && (
+            <div
+              className="dragging-delete-icon"
+              style={{ left: dragPos.x, top: dragPos.y }}
+            >
+              🗑️
+            </div>
+          )}
+
           <Map
             className="map"
             defaultCenter={INDIA_CENTER}
@@ -224,6 +341,12 @@ export default function DisasterMap() {
             gestureHandling={mode === "DRAWING" ? "none" : "auto"}
             {...mapOptions}
           >
+            <DragDropManager
+              isDraggingDelete={isDraggingDelete}
+              setIsDraggingDelete={setIsDraggingDelete}
+              areas={areas}
+              deleteArea={deleteArea}
+            />
             <MapEvents
               mode={mode}
               center={center}
@@ -288,37 +411,8 @@ export default function DisasterMap() {
         </section>
 
         <section className="panel">
-          <div className="header">
-            <div>
-              <h1>🇮🇳 India Disaster Area Selector</h1>
-              <p>Add a pin, stretch its radius, select a date, and save the disaster-analysis area.</p>
-            </div>
-
-            <div className="actions">
-              <button
-                className={mode !== "IDLE" ? "primary active" : "primary"}
-                onClick={() => {
-                  if (mode === "IDLE") setMode("PLACING");
-                  else setMode("IDLE");
-                }}
-              >
-                📍 {mode !== "IDLE" ? "Add Pin ON" : "Add Pin"}
-              </button>
-              <button className="convert-btn" onClick={() => alert("Pencil tool feature coming soon!")}>
-                ✏️ Pencil Tool
-              </button>
-              <button className="convert-btn" onClick={() => alert("Conversion feature coming soon!")}>
-                Convert →
-              </button>
-              <button className="secondary" onClick={clearAll}>
-                Clear All
-              </button>
-            </div>
-          </div>
-
           <div className="status">
             <div className="status-text">
-              {mode === "IDLE" && !selectedAreaId && "Turn on Add Pin to create a new area, or click any pin on the map to edit it."}
               {mode === "IDLE" && selectedAreaId && "Pin selected."}
               {mode === "PLACING" && "Click the map to place the center of a new area."}
               {mode === "DRAWING" && `Move the cursor to stretch the radius. Current radius: ${(liveRadius / 1000).toFixed(3)} km`}
@@ -345,10 +439,10 @@ export default function DisasterMap() {
             </div>
           )}
 
-          <div className="table-wrap">
+          <div className={`table-wrap ${isTableCollapsed ? "collapsed" : ""}`}>
             <table>
-              <thead>
-                <tr>
+              <thead onClick={() => setIsTableCollapsed(!isTableCollapsed)} style={{ cursor: "pointer" }}>
+                <tr className="collapsible-header">
                   <th>Pin</th>
                   <th>Date</th>
                   <th>Center Latitude</th>
@@ -356,117 +450,120 @@ export default function DisasterMap() {
                   <th>Radius (km)</th>
                   <th>Radius (m)</th>
                   <th>Action</th>
+                  <th className="collapse-indicator">{isTableCollapsed ? "展开 ▽" : "收起  △"}</th>
                 </tr>
               </thead>
-              <tbody>
-                {areas.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="empty">No disaster areas created yet.</td>
-                  </tr>
-                ) : (
-                  areas.map((area, index) => (
-                    <tr
-                      key={area.id}
-                      style={{
-                        backgroundColor: selectedAreaId === area.id ? "#e0f2fe" : "transparent",
-                        cursor: "default",
-                      }}
-                    >
-                      <td>
-                        <input
-                          type="text"
-                          className="table-text-input"
-                          value={area.name || `Pin ${index + 1}`}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => updateArea(area.id, { name: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="date"
-                          className="table-date-input"
-                          value={area.date}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => updateArea(area.id, { date: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          className="table-num-input"
-                          value={area.center?.lat?.toFixed(6) ?? ""}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) {
-                              updateArea(area.id, { center: { ...area.center, lat: val } });
-                            }
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          className="table-num-input"
-                          value={area.center?.lng?.toFixed(6) ?? ""}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) {
-                              updateArea(area.id, { center: { ...area.center, lng: val } });
-                            }
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          className="table-num-input"
-                          value={(area.radiusMeters ? area.radiusMeters / 1000 : 0).toFixed(3)}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) {
-                              updateArea(area.id, { radiusMeters: val * 1000 });
-                            }
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          className="table-num-input"
-                          value={area.radiusMeters?.toFixed(2) ?? ""}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) {
-                              updateArea(area.id, { radiusMeters: val });
-                            }
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          className="delete-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteArea(area.id);
-                          }}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            fontSize: "14px",
-                          }}
-                        >
-                          🗑️
-                        </button>
-                      </td>
+              {!isTableCollapsed && (
+                <tbody>
+                  {areas.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" className="empty">No disaster areas created yet.</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
+                  ) : (
+                    areas.map((area, index) => (
+                      <tr
+                        key={area.id}
+                        style={{
+                          backgroundColor: selectedAreaId === area.id ? "#e0f2fe" : "transparent",
+                          cursor: "default",
+                        }}
+                      >
+                        <td>
+                          <input
+                            type="text"
+                            className="table-text-input"
+                            value={area.name || `Pin ${index + 1}`}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => updateArea(area.id, { name: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="date"
+                            className="table-date-input"
+                            value={area.date}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => updateArea(area.id, { date: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            className="table-num-input"
+                            value={area.center?.lat?.toFixed(6) ?? ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val)) {
+                                updateArea(area.id, { center: { ...area.center, lat: val } });
+                              }
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            className="table-num-input"
+                            value={area.center?.lng?.toFixed(6) ?? ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val)) {
+                                updateArea(area.id, { center: { ...area.center, lng: val } });
+                              }
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            className="table-num-input"
+                            value={(area.radiusMeters ? area.radiusMeters / 1000 : 0).toFixed(3)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val)) {
+                                updateArea(area.id, { radiusMeters: val * 1000 });
+                              }
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            className="table-num-input"
+                            value={area.radiusMeters?.toFixed(2) ?? ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val)) {
+                                updateArea(area.id, { radiusMeters: val });
+                              }
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <button
+                            className="delete-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteArea(area.id);
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: "14px",
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              )}
             </table>
           </div>
         </section>
