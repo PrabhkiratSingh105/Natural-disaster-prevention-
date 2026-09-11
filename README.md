@@ -31,6 +31,8 @@ Then set:
 
 ```env
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=YOUR_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=YOUR_GOOGLE_MAPS_MAP_ID
+NEXT_PUBLIC_GOOGLE_MAPS_BOUNDARIES_ENABLED=false
 ```
 
 Because the Google Maps JavaScript API runs in the browser, this key is necessarily exposed to the browser. Use a browser-restricted API key; do not put a server secret/service-account credential in `NEXT_PUBLIC_*`.
@@ -62,9 +64,19 @@ Enable these APIs for map display and place-name search:
 - Maps JavaScript API
 - Places API (New)
 
+To show the actual selected locality or administrative boundary, create a
+Google Cloud map ID using vector rendering and enable the boundary feature
+layers for administrative areas and localities. Set that map ID as
+`NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID`. Without it, the map and search still work,
+but Google does not expose the polygon boundary layer.
+
+Only set `NEXT_PUBLIC_GOOGLE_MAPS_BOUNDARIES_ENABLED=true` after the Map Style
+has the boundary feature layers enabled. This prevents the Maps API from
+logging feature-layer configuration errors while the style is still being set up.
+
 The search uses the current Places AutocompleteSuggestion API to show matching
-place names. Choosing a result only fills the search box; it does not select,
-highlight, zoom to, or draw an area.
+place names. Choosing a result selects the place, zooms to it, and highlights
+its Google boundary when the configured map ID supports boundary layers.
 
 Places and Maps Platform requests can incur billing. Use API key restrictions
 in production.

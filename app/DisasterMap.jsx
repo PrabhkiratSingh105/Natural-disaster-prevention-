@@ -35,6 +35,38 @@ function distanceMeters(a, b) {
   return 2 * earthRadius * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
+function areaFromRadius(radiusMeters) {
+  return radiusMeters > 0 ? Math.PI * radiusMeters ** 2 : 0;
+}
+
+function areaFromViewport(viewport) {
+  if (!viewport) return 0;
+
+  const northSouth = distanceMeters(
+    { lat: viewport.north, lng: viewport.west },
+    { lat: viewport.south, lng: viewport.west }
+  );
+  const eastWest = distanceMeters(
+    { lat: viewport.north, lng: viewport.west },
+    { lat: viewport.north, lng: viewport.east }
+  );
+  return northSouth * eastWest;
+}
+
+function formatArea(areaSquareMeters) {
+  return {
+    km: areaSquareMeters > 0 ? (areaSquareMeters / 1_000_000).toFixed(3) : "",
+    meters: areaSquareMeters > 0 ? areaSquareMeters.toFixed(2) : "",
+  };
+}
+
+function getAreaSquareMeters(area) {
+  if (!area) return 0;
+  if (area.areaSquareMeters != null) return area.areaSquareMeters;
+  if (area.viewport) return areaFromViewport(area.viewport);
+  return areaFromRadius(area.radiusMeters);
+}
+
 function findAreaAtDrop(projection, areas, dropLatLng, dropPixel) {
   let bestId = null;
   let bestScore = Infinity;
@@ -141,15 +173,23 @@ function PlaceSearch({ onPlaceSelect }) {
       const location = place.location;
       if (location) {
         const coords = { lat: location.lat(), lng: location.lng() };
+        const viewport = place.viewport?.toJSON?.() || null;
 
-        // Always pan and zoom to the searched place reliably
-        map.panTo(coords);
-        map.setZoom(10);
+        // Fit the map to the searched place when Google returns its bounds.
+        if (place.viewport) {
+          map.fitBounds(place.viewport);
+        } else {
+          map.panTo(coords);
+          map.setZoom(10);
+        }
 
         // Notify parent to add the area
         onPlaceSelect({
           name: displayName,
           center: coords,
+          viewport,
+          placeId,
+          areaSquareMeters: areaFromViewport(viewport),
         });
       }
     } catch (err) {
@@ -269,6 +309,7 @@ function MapEvents({
               date: selectedDate,
               center: { ...center },
               radiusMeters,
+              areaSquareMeters: areaFromRadius(radiusMeters),
             },
           ]);
           setCenter(null);
@@ -280,7 +321,9 @@ function MapEvents({
         if (areaToEdit) {
           const radiusMeters = distanceMeters(areaToEdit.center, coords);
           setAreas((prev) =>
-            prev.map((a) => (a.id === selectedAreaId ? { ...a, radiusMeters } : a))
+              prev.map((a) => (a.id === selectedAreaId
+                ? { ...a, radiusMeters, areaSquareMeters: areaFromRadius(radiusMeters) }
+                : a))
           );
           setLiveRadius(0);
           setMode("IDLE");
@@ -369,8 +412,61 @@ function DragDropManager({ isDraggingDelete, setIsDraggingDelete, areas, deleteA
   return null;
 }
 
+function SelectedBoundary({ placeId, mapId }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map || !mapId || !placeId || !google.maps.FeatureType) return undefined;
+
+    const featureTypes = [
+      google.maps.FeatureType.ADMINISTRATIVE_AREA_LEVEL_1,
+      google.maps.FeatureType.ADMINISTRATIVE_AREA_LEVEL_2,
+      google.maps.FeatureType.LOCALITY,
+    ].filter(Boolean);
+    let layers;
+
+    try {
+      layers = featureTypes
+        .map((featureType) => map.getFeatureLayer(featureType))
+        .filter(Boolean);
+    } catch {
+      return undefined;
+    }
+
+    const style = ({ feature }) => {
+      if (feature.placeId !== placeId) return null;
+
+      return {
+        fillColor: "#2563eb",
+        fillOpacity: 0.18,
+        strokeColor: "#1d4ed8",
+        strokeOpacity: 1,
+        strokeWeight: 3,
+      };
+    };
+
+    try {
+      layers.forEach((layer) => {
+        layer.style = style;
+      });
+    } catch {
+      return undefined;
+    }
+
+    return () => {
+      layers.forEach((layer) => {
+        layer.style = null;
+      });
+    };
+  }, [map, mapId, placeId]);
+
+  return null;
+}
+
 export default function DisasterMap() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
+  const boundariesEnabled = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BOUNDARIES_ENABLED === "true";
 
   // State Machine: 'IDLE' | 'PLACING' | 'DRAWING' | 'EDITING'
   const [mode, setMode] = useState("IDLE");
@@ -383,6 +479,7 @@ export default function DisasterMap() {
   const [isDraggingDelete, setIsDraggingDelete] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const [showRadiusNotice, setShowRadiusNotice] = useState(false);
+  const [selectedBoundaryPlaceId, setSelectedBoundaryPlaceId] = useState(null);
 
   useEffect(() => {
     setSelectedDate(todayString());
@@ -449,7 +546,7 @@ export default function DisasterMap() {
         <section className="map-section">
           <div className="map-search-panel">
             <PlaceSearch
-              onPlaceSelect={({ name, center: placeCenter }) => {
+              onPlaceSelect={({ name, center: placeCenter, viewport, placeId, areaSquareMeters }) => {
                 const newId = crypto.randomUUID();
                 setAreas((prev) => [
                   ...prev,
@@ -459,8 +556,11 @@ export default function DisasterMap() {
                     date: selectedDate || todayString(),
                     center: placeCenter,
                     radiusMeters: null,
+                    viewport,
+                    areaSquareMeters,
                   },
                 ]);
+                setSelectedBoundaryPlaceId(placeId);
                 setShowRadiusNotice(true);
               }}
             />
@@ -468,7 +568,7 @@ export default function DisasterMap() {
 
           {showRadiusNotice && (
             <div className="radius-notice" role="status">
-              <span>Increase the area using the radius size/length option below.</span>
+              <span>Adjust the selected area on the map to change its size.</span>
               <button
                 type="button"
                 className="radius-notice-dismiss"
@@ -520,11 +620,15 @@ export default function DisasterMap() {
 
           <Map
             className="map"
+            mapId={mapId}
             defaultCenter={INDIA_CENTER}
             defaultZoom={5}
             gestureHandling={mode === "DRAWING" ? "none" : "auto"}
             {...mapOptions}
           >
+            {boundariesEnabled && (
+              <SelectedBoundary placeId={selectedBoundaryPlaceId} mapId={mapId} />
+            )}
             <DragDropManager
               isDraggingDelete={isDraggingDelete}
               setIsDraggingDelete={setIsDraggingDelete}
@@ -617,8 +721,14 @@ export default function DisasterMap() {
                 </strong>
               </div>
               <div className="live-stat">
-                <span>Radius</span>
-                <strong>{(liveRadius / 1000).toFixed(3)} km</strong>
+                <span>Area</span>
+                <strong>
+                  {formatArea(
+                    mode === "EDITING" && liveRadius === 0
+                      ? getAreaSquareMeters(areas.find((area) => area.id === selectedAreaId))
+                      : areaFromRadius(liveRadius)
+                  ).km || "0.000"} km²
+                </strong>
               </div>
             </div>
           )}
@@ -631,8 +741,8 @@ export default function DisasterMap() {
                   <th>Date</th>
                   <th>Center Latitude</th>
                   <th>Center Longitude</th>
+                  <th>Area (km²)</th>
                   <th>Radius (km)</th>
-                  <th>Radius (m)</th>
                   <th>Action</th>
                   <th className="collapse-indicator">{isTableCollapsed ? "Expand" : "Collapse"}</th>
                 </tr>
@@ -698,33 +808,9 @@ export default function DisasterMap() {
                             }}
                           />
                         </td>
+                        <td>{formatArea(getAreaSquareMeters(area)).km}</td>
                         <td>
-                          <input
-                            type="number"
-                            className="table-num-input"
-                            value={area.radiusMeters != null && area.radiusMeters !== 0 ? (area.radiusMeters / 1000).toFixed(3) : ""}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              if (!isNaN(val)) {
-                                updateArea(area.id, { radiusMeters: val * 1000 });
-                              }
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            className="table-num-input"
-                            value={area.radiusMeters?.toFixed(2) ?? ""}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              if (!isNaN(val)) {
-                                updateArea(area.id, { radiusMeters: val });
-                              }
-                            }}
-                          />
+                          {area.radiusMeters > 0 ? (area.radiusMeters / 1000).toFixed(3) : ""}
                         </td>
                         <td>
                           <button
