@@ -162,12 +162,20 @@ function PlaceSearch({ onPlaceSelect }) {
   async function handleSearch(prediction = selectedPrediction, displayName = query) {
     if (!prediction || !places || !map) return;
 
+    const placeId = prediction.placeId;
+    const resourceName = prediction.resourceName || (placeId ? `places/${placeId}` : null);
+    const resolvedPlaceId = placeId || resourceName?.split("/").pop();
+    if (!placeId && !resourceName) {
+      console.warn("Selected place prediction does not include a Google place identifier.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const placeId = prediction.placeId;
-
       // Use the new Place class to fetch location details
-      const place = new places.Place({ id: placeId });
+      const place = new places.Place(
+        placeId ? { id: placeId } : { resourceName }
+      );
       await place.fetchFields({ fields: ["location", "viewport"] });
 
       const location = place.location;
@@ -188,7 +196,7 @@ function PlaceSearch({ onPlaceSelect }) {
           name: displayName,
           center: coords,
           viewport,
-          placeId,
+          placeId: resolvedPlaceId,
           areaSquareMeters: areaFromViewport(viewport),
         });
       }
@@ -242,15 +250,6 @@ function PlaceSearch({ onPlaceSelect }) {
           }}
         />
         {isSearching && <span className="search-spinner" aria-label="Searching" />}
-        <button
-          type="button"
-          className="search-btn"
-          disabled={!selectedPrediction || isSubmitting}
-          onClick={handleSearch}
-          title="Search and add to map"
-        >
-          {isSubmitting ? "…" : "Search"}
-        </button>
       </div>
       {predictions.length > 0 && (
         <ul className="place-results">
@@ -259,7 +258,12 @@ function PlaceSearch({ onPlaceSelect }) {
               <button
                 type="button"
                 className={index === highlightedPredictionIndex ? "highlighted" : ""}
-                onClick={() => choosePrediction(prediction)}
+                onClick={() => {
+                  const displayName =
+                    prediction.text?.toString() || prediction.mainText?.toString() || "";
+                  choosePrediction(prediction);
+                  handleSearch(prediction, displayName);
+                }}
               >
                 <strong>{prediction.mainText?.toString() || prediction.text?.toString()}</strong>
                 <span>{prediction.secondaryText?.toString() || ""}</span>
