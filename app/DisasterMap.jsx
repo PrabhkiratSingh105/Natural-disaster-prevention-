@@ -6,7 +6,10 @@ import {
   Map,
   Marker,
   Circle,
+<<<<<<< HEAD
   useMapsLibrary,
+=======
+>>>>>>> 41630022508da1938470203af4bb6429fa87aaed
   useMap,
 } from "@vis.gl/react-google-maps";
 
@@ -70,6 +73,7 @@ function todayString() {
   return `${year}-${month}-${day}`;
 }
 
+<<<<<<< HEAD
 function PlaceSearch() {
   const places = useMapsLibrary("places");
   const [query, setQuery] = useState("");
@@ -136,6 +140,8 @@ function PlaceSearch() {
   );
 }
 
+=======
+>>>>>>> 41630022508da1938470203af4bb6429fa87aaed
 function MapEvents({
   mode,
   center,
@@ -332,6 +338,20 @@ export default function DisasterMap() {
     }
   }
 
+<<<<<<< HEAD
+=======
+  function clearAll() {
+    if (!window.confirm("Are you sure you want to clear all pins? All data will be gone and there is no way to restore it.")) {
+      return;
+    }
+    setAreas([]);
+    setCenter(null);
+    setLiveRadius(0);
+    setMode("IDLE");
+    setSelectedAreaId(null);
+  }
+
+>>>>>>> 41630022508da1938470203af4bb6429fa87aaed
   if (!apiKey) {
     return (
       <main className="setup-screen">
@@ -346,6 +366,7 @@ export default function DisasterMap() {
   }
 
   return (
+<<<<<<< HEAD
     <APIProvider apiKey={apiKey} libraries={["places"]}>
       <main className="app">
         <section className="map-section">
@@ -353,6 +374,11 @@ export default function DisasterMap() {
             <PlaceSearch />
           </div>
 
+=======
+    <APIProvider apiKey={apiKey}>
+      <main className="app">
+        <section className="map-section">
+>>>>>>> 41630022508da1938470203af4bb6429fa87aaed
           <div className="floating-menu">
             <button
               className={`menu-item ${mode !== "IDLE" ? "active" : ""}`}
@@ -364,6 +390,12 @@ export default function DisasterMap() {
             >
               📍
             </button>
+<<<<<<< HEAD
+=======
+            <button className="menu-item" onClick={() => alert("Search feature coming soon!")} title="Search">
+              🔍
+            </button>
+>>>>>>> 41630022508da1938470203af4bb6429fa87aaed
             <button className="menu-item" onClick={() => alert("Submission feature coming soon!")} title="Submit">
               ✅
             </button>
