@@ -70,6 +70,131 @@ function todayString() {
   return `${year}-${month}-${day}`;
 }
 
+function PlaceSearch({ onPlaceSelect }) {
+  const places = useMapsLibrary("places");
+  const map = useMap();
+  const [query, setQuery] = useState("");
+  const [predictions, setPredictions] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedPrediction, setSelectedPrediction] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!places || query.trim().length < 2) {
+      setPredictions([]);
+      return undefined;
+    }
+
+    // Don't fetch if the user just selected this exact text from the dropdown
+    if (
+      selectedPrediction &&
+      (query === selectedPrediction.text?.toString() ||
+       query === selectedPrediction.mainText?.toString())
+    ) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setIsSearching(true);
+      places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+        input: query.trim(),
+        includedRegionCodes: ["in"],
+      })
+        .then(({ suggestions }) => {
+          setPredictions(
+            (suggestions || [])
+              .map((suggestion) => suggestion.placePrediction)
+              .filter(Boolean)
+          );
+        })
+        .catch(() => setPredictions([]))
+        .finally(() => setIsSearching(false));
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [places, query, selectedPrediction]);
+
+  function choosePrediction(prediction) {
+    const displayName = prediction.text?.toString() || prediction.mainText?.toString() || "";
+    setQuery(displayName);
+    setSelectedPrediction(prediction);
+    setPredictions([]);
+  }
+
+  async function handleSearch() {
+    if (!selectedPrediction || !places || !map) return;
+
+    setIsSubmitting(true);
+    try {
+      const placeId = selectedPrediction.placeId;
+      const displayName = query;
+
+      // Use the new Place class to fetch location details
+      const place = new places.Place({ id: placeId });
+      await place.fetchFields({ fields: ["location", "viewport"] });
+
+      const location = place.location;
+      if (location) {
+        const coords = { lat: location.lat(), lng: location.lng() };
+
+        // Always pan and zoom to the searched place reliably
+        map.panTo(coords);
+        map.setZoom(10);
+
+        // Notify parent to add the area
+        onPlaceSelect({
+          name: displayName,
+          center: coords,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch place details:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="place-search">
+      <div className="place-search-input-wrap">
+        <span aria-hidden="true">⌕</span>
+        <input
+          type="search"
+          value={query}
+          placeholder="Search a state, district, city..."
+          aria-label="Search for a geographic area"
+          onChange={(event) => {
+            setQuery(event.target.value);
+            if (selectedPrediction) setSelectedPrediction(null);
+          }}
+        />
+        {isSearching && <span className="search-spinner" aria-label="Searching" />}
+        <button
+          type="button"
+          className="search-btn"
+          disabled={!selectedPrediction || isSubmitting}
+          onClick={handleSearch}
+          title="Search and add to map"
+        >
+          {isSubmitting ? "…" : "Search"}
+        </button>
+      </div>
+      {predictions.length > 0 && (
+        <ul className="place-results">
+          {predictions.map((prediction) => (
+            <li key={prediction.placeId}>
+              <button type="button" onClick={() => choosePrediction(prediction)}>
+                <strong>{prediction.mainText?.toString() || prediction.text?.toString()}</strong>
+                <span>{prediction.secondaryText?.toString() || ""}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function MapEvents({
   mode,
   center,
@@ -284,6 +409,24 @@ export default function DisasterMap() {
     <APIProvider apiKey={apiKey} libraries={["places"]}>
       <main className="app">
         <section className="map-section">
+          <div className="map-search-panel">
+            <PlaceSearch
+              onPlaceSelect={({ name, center: placeCenter }) => {
+                const newId = crypto.randomUUID();
+                setAreas((prev) => [
+                  ...prev,
+                  {
+                    id: newId,
+                    name,
+                    date: selectedDate || todayString(),
+                    center: placeCenter,
+                    radiusMeters: null,
+                  },
+                ]);
+              }}
+            />
+          </div>
+
           <div className="floating-menu">
             <button
               className={`menu-item ${mode !== "IDLE" ? "active" : ""}`}

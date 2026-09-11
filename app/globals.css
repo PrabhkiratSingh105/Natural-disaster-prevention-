@@ -111,6 +111,122 @@ input {
   height: 100%;
 }
 
+.map-search-panel {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 40px));
+  z-index: 11;
+}
+
+.place-search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  min-height: 52px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.16);
+  color: var(--text-muted);
+}
+
+.place-search-input-wrap input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  color: var(--text-main);
+  background: transparent;
+}
+
+.place-search-input-wrap input::placeholder {
+  color: #94a3b8;
+}
+
+.search-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #cbd5e1;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.search-btn {
+  flex-shrink: 0;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+.search-btn:hover:not(:disabled) {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.search-btn:disabled {
+  background: #cbd5e1;
+  color: #94a3b8;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.place-results {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 6px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.16);
+}
+
+.place-results li + li {
+  border-top: 1px solid #f1f5f9;
+}
+
+.place-results button {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  text-align: left;
+  background: transparent;
+  color: var(--text-main);
+}
+
+.place-results button:hover {
+  background: #f8fafc;
+}
+
+.place-results strong {
+  font-size: 13px;
+}
+
+.place-results span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .panel {
   background: var(--bg-panel);
   box-shadow: 0 -10px 25px -5px rgba(0, 0, 0, 0.05);
