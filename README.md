@@ -30,7 +30,7 @@ to:
 Then set:
 
 ```env
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
+GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
 ```
 
 Because the Google Maps JavaScript API runs in the browser, this key is necessarily exposed to the browser. Use a browser-restricted API key; do not put a server secret/service-account credential in `NEXT_PUBLIC_*`.
@@ -106,7 +106,6 @@ with:
 }
 ```
 
-
 ## Important implementation note
 
 `@vis.gl/react-google-maps` exposes the map click/mouse event position through
@@ -114,13 +113,13 @@ with:
 literal, so the code uses:
 
 ```js
-event.detail.lat
-event.detail.lng
+event.detail.lat;
+event.detail.lng;
 ```
 
 rather than the older Google Maps class-style:
 
 ```js
-event.detail.latLng.lat()
-event.detail.latLng.lng()
+event.detail.latLng.lat();
+event.detail.latLng.lng();
 ```

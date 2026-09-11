@@ -207,7 +207,7 @@ function DragDropManager({ isDraggingDelete, setIsDraggingDelete, areas, deleteA
 }
 
 export default function DisasterMap() {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
   // State Machine: 'IDLE' | 'PLACING' | 'DRAWING' | 'EDITING'
   const [mode, setMode] = useState("IDLE");
@@ -282,7 +282,7 @@ export default function DisasterMap() {
         <div className="setup-card">
           <h1>Google Maps API key missing</h1>
           <p>Add your key to <code>.env.local</code>:</p>
-          <pre>NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=YOUR_KEY_HERE</pre>
+          <pre>GOOGLE_MAPS_API_KEY=YOUR_KEY_HERE</pre>
           <p>Then restart the Next.js development server.</p>
         </div>
       </main>
