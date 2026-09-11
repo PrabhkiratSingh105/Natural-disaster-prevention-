@@ -30,7 +30,7 @@ to:
 Then set:
 
 ```env
-GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=YOUR_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 ```
 
 Because the Google Maps JavaScript API runs in the browser, this key is necessarily exposed to the browser. Use a browser-restricted API key; do not put a server secret/service-account credential in `NEXT_PUBLIC_*`.
