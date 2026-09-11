@@ -57,7 +57,6 @@ http://localhost:3000
 
 Make sure your Google Cloud project has billing configured and the required Google Maps Platform services enabled for the JavaScript map you use.
 
-<<<<<<< HEAD
 Enable these APIs for map display and place-name search:
 
 - Maps JavaScript API
@@ -70,8 +69,6 @@ highlight, zoom to, or draw an area.
 Places and Maps Platform requests can incur billing. Use API key restrictions
 in production.
 
-=======
->>>>>>> 41630022508da1938470203af4bb6429fa87aaed
 For deployment, restrict the browser key to the domains/origins used by your app.
 
 ## Current interaction

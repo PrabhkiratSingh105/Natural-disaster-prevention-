@@ -111,7 +111,6 @@ input {
   height: 100%;
 }
 
-<<<<<<< HEAD
 .map-search-panel {
   position: absolute;
   top: 20px;
@@ -202,8 +201,6 @@ input {
   }
 }
 
-=======
->>>>>>> 41630022508da1938470203af4bb6429fa87aaed
 .panel {
   background: var(--bg-panel);
   box-shadow: 0 -10px 25px -5px rgba(0, 0, 0, 0.05);
