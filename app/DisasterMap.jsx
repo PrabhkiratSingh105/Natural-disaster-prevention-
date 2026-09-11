@@ -416,11 +416,12 @@ function DragDropManager({ isDraggingDelete, setIsDraggingDelete, areas, deleteA
   return null;
 }
 
-function SelectedBoundary({ placeId, mapId }) {
+function SelectedBoundary({ placeIds, mapId }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!map || !mapId || !placeId || !google.maps.FeatureType) return undefined;
+    if (!map || !mapId || placeIds.length === 0 || !google.maps.FeatureType) return undefined;
+    const selectedPlaceIds = new Set(placeIds);
 
     const featureTypes = [
       google.maps.FeatureType.ADMINISTRATIVE_AREA_LEVEL_1,
@@ -438,7 +439,7 @@ function SelectedBoundary({ placeId, mapId }) {
     }
 
     const style = ({ feature }) => {
-      if (feature.placeId !== placeId) return null;
+      if (!selectedPlaceIds.has(feature.placeId)) return null;
 
       return {
         fillColor: "#2563eb",
@@ -462,7 +463,7 @@ function SelectedBoundary({ placeId, mapId }) {
         layer.style = null;
       });
     };
-  }, [map, mapId, placeId]);
+  }, [map, mapId, placeIds]);
 
   return null;
 }
@@ -483,7 +484,10 @@ export default function DisasterMap() {
   const [isDraggingDelete, setIsDraggingDelete] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const [showRadiusNotice, setShowRadiusNotice] = useState(false);
-  const [selectedBoundaryPlaceId, setSelectedBoundaryPlaceId] = useState(null);
+  const boundaryPlaceIds = useMemo(
+    () => areas.map((area) => area.placeId).filter(Boolean),
+    [areas]
+  );
 
   useEffect(() => {
     setSelectedDate(todayString());
@@ -562,9 +566,9 @@ export default function DisasterMap() {
                     radiusMeters: null,
                     viewport,
                     areaSquareMeters,
+                    placeId,
                   },
                 ]);
-                setSelectedBoundaryPlaceId(placeId);
                 setShowRadiusNotice(true);
               }}
             />
@@ -631,7 +635,7 @@ export default function DisasterMap() {
             {...mapOptions}
           >
             {boundariesEnabled && (
-              <SelectedBoundary placeId={selectedBoundaryPlaceId} mapId={mapId} />
+              <SelectedBoundary placeIds={boundaryPlaceIds} mapId={mapId} />
             )}
             <DragDropManager
               isDraggingDelete={isDraggingDelete}
