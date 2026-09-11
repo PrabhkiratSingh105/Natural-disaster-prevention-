@@ -77,6 +77,7 @@ function PlaceSearch({ onPlaceSelect }) {
   const [predictions, setPredictions] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedPrediction, setSelectedPrediction] = useState(null);
+  const [highlightedPredictionIndex, setHighlightedPredictionIndex] = useState(-1);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -106,8 +107,12 @@ function PlaceSearch({ onPlaceSelect }) {
               .map((suggestion) => suggestion.placePrediction)
               .filter(Boolean)
           );
+          setHighlightedPredictionIndex(-1);
         })
-        .catch(() => setPredictions([]))
+        .catch(() => {
+          setPredictions([]);
+          setHighlightedPredictionIndex(-1);
+        })
         .finally(() => setIsSearching(false));
     }, 250);
 
@@ -119,15 +124,15 @@ function PlaceSearch({ onPlaceSelect }) {
     setQuery(displayName);
     setSelectedPrediction(prediction);
     setPredictions([]);
+    setHighlightedPredictionIndex(-1);
   }
 
-  async function handleSearch() {
-    if (!selectedPrediction || !places || !map) return;
+  async function handleSearch(prediction = selectedPrediction, displayName = query) {
+    if (!prediction || !places || !map) return;
 
     setIsSubmitting(true);
     try {
-      const placeId = selectedPrediction.placeId;
-      const displayName = query;
+      const placeId = prediction.placeId;
 
       // Use the new Place class to fetch location details
       const place = new places.Place({ id: placeId });
@@ -166,6 +171,34 @@ function PlaceSearch({ onPlaceSelect }) {
           onChange={(event) => {
             setQuery(event.target.value);
             if (selectedPrediction) setSelectedPrediction(null);
+            setHighlightedPredictionIndex(-1);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" && predictions.length > 0) {
+              event.preventDefault();
+              setHighlightedPredictionIndex((currentIndex) =>
+                currentIndex < predictions.length - 1 ? currentIndex + 1 : 0
+              );
+            } else if (event.key === "ArrowUp" && predictions.length > 0) {
+              event.preventDefault();
+              setHighlightedPredictionIndex((currentIndex) =>
+                currentIndex > 0 ? currentIndex - 1 : predictions.length - 1
+              );
+            } else if (event.key === "Enter") {
+              const highlightedPrediction = predictions[highlightedPredictionIndex];
+              if (highlightedPrediction) {
+                event.preventDefault();
+                const displayName =
+                  highlightedPrediction.text?.toString() ||
+                  highlightedPrediction.mainText?.toString() ||
+                  "";
+                choosePrediction(highlightedPrediction);
+                handleSearch(highlightedPrediction, displayName);
+              } else if (selectedPrediction) {
+                event.preventDefault();
+                handleSearch();
+              }
+            }
           }}
         />
         {isSearching && <span className="search-spinner" aria-label="Searching" />}
@@ -181,9 +214,13 @@ function PlaceSearch({ onPlaceSelect }) {
       </div>
       {predictions.length > 0 && (
         <ul className="place-results">
-          {predictions.map((prediction) => (
+          {predictions.map((prediction, index) => (
             <li key={prediction.placeId}>
-              <button type="button" onClick={() => choosePrediction(prediction)}>
+              <button
+                type="button"
+                className={index === highlightedPredictionIndex ? "highlighted" : ""}
+                onClick={() => choosePrediction(prediction)}
+              >
                 <strong>{prediction.mainText?.toString() || prediction.text?.toString()}</strong>
                 <span>{prediction.secondaryText?.toString() || ""}</span>
               </button>
@@ -345,6 +382,7 @@ export default function DisasterMap() {
   const [isTableCollapsed, setIsTableCollapsed] = useState(false);
   const [isDraggingDelete, setIsDraggingDelete] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const [showRadiusNotice, setShowRadiusNotice] = useState(false);
 
   useEffect(() => {
     setSelectedDate(todayString());
@@ -423,9 +461,24 @@ export default function DisasterMap() {
                     radiusMeters: null,
                   },
                 ]);
+                setShowRadiusNotice(true);
               }}
             />
           </div>
+
+          {showRadiusNotice && (
+            <div className="radius-notice" role="status">
+              <span>Increase the area using the radius size/length option below.</span>
+              <button
+                type="button"
+                className="radius-notice-dismiss"
+                aria-label="Dismiss radius notice"
+                onClick={() => setShowRadiusNotice(false)}
+              >
+                &times;
+              </button>
+            </div>
+          )}
 
           <div className="floating-menu">
             <button

@@ -120,6 +120,42 @@ input {
   z-index: 11;
 }
 
+.radius-notice {
+  position: absolute;
+  top: 88px;
+  right: 20px;
+  z-index: 11;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(310px, calc(100% - 40px));
+  padding: 12px 12px 12px 14px;
+  background: #fff;
+  border: 1px solid var(--primary);
+  border-left: 4px solid var(--primary);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.16);
+  color: #000;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.radius-notice-dismiss {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #000;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.radius-notice-dismiss:hover {
+  background: #eff6ff;
+}
+
 .place-search-input-wrap {
   display: flex;
   align-items: center;
@@ -210,6 +246,11 @@ input {
 
 .place-results button:hover {
   background: #f8fafc;
+}
+
+.place-results button.highlighted {
+  background: #eff6ff;
+  color: var(--primary-hover);
 }
 
 .place-results strong {
@@ -551,5 +592,10 @@ tr:last-child td {
   .actions button {
     flex: 1;
     justify-content: center;
+  }
+  .radius-notice {
+    top: 84px;
+    right: 12px;
+    width: min(310px, calc(100% - 24px));
   }
 }
