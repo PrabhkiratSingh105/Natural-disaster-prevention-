@@ -70,72 +70,6 @@ function todayString() {
   return `${year}-${month}-${day}`;
 }
 
-function PlaceSearch() {
-  const places = useMapsLibrary("places");
-  const [query, setQuery] = useState("");
-  const [predictions, setPredictions] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-
-  useEffect(() => {
-    if (!places || query.trim().length < 2) {
-      setPredictions([]);
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setIsSearching(true);
-      places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-        input: query.trim(),
-        includedRegionCodes: ["in"],
-      })
-        .then(({ suggestions }) => {
-          setPredictions(
-            (suggestions || [])
-              .map((suggestion) => suggestion.placePrediction)
-              .filter(Boolean)
-          );
-        })
-        .catch(() => setPredictions([]))
-        .finally(() => setIsSearching(false));
-    }, 250);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [places, query]);
-
-  function choosePrediction(prediction) {
-    setQuery(prediction.text?.toString() || prediction.mainText?.toString() || "");
-    setPredictions([]);
-  }
-
-  return (
-    <div className="place-search">
-      <div className="place-search-input-wrap">
-        <span aria-hidden="true">⌕</span>
-        <input
-          type="search"
-          value={query}
-          placeholder="Search a state, district, city..."
-          aria-label="Search for a geographic area"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        {isSearching && <span className="search-spinner" aria-label="Searching" />}
-      </div>
-      {predictions.length > 0 && (
-        <ul className="place-results">
-          {predictions.map((prediction) => (
-            <li key={prediction.placeId}>
-              <button type="button" onClick={() => choosePrediction(prediction)}>
-                <strong>{prediction.mainText?.toString() || prediction.text?.toString()}</strong>
-                <span>{prediction.secondaryText?.toString() || ""}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function MapEvents({
   mode,
   center,
@@ -315,7 +249,8 @@ export default function DisasterMap() {
 
   const mapOptions = useMemo(
     () => ({
-      restriction: { latLngBounds: INDIA_BOUNDS, strictBounds: false },
+      // Map restriction is disabled for now to allow users to explore outside India, but you can enable it if needed.
+      // restriction: { latLngBounds: INDIA_BOUNDS, strictBounds: false },
       mapTypeControl: true,
       streetViewControl: true,
       fullscreenControl: true,
@@ -349,10 +284,6 @@ export default function DisasterMap() {
     <APIProvider apiKey={apiKey} libraries={["places"]}>
       <main className="app">
         <section className="map-section">
-          <div className="map-search-panel">
-            <PlaceSearch />
-          </div>
-
           <div className="floating-menu">
             <button
               className={`menu-item ${mode !== "IDLE" ? "active" : ""}`}
@@ -452,16 +383,23 @@ export default function DisasterMap() {
                     setMode("EDITING");
                   }}
                 />
-                <Circle
-                  center={area.center}
-                  radius={area.radiusMeters}
-                  strokeColor={selectedAreaId === area.id ? "#3b82f6" : "#b91c1c"}
-                  strokeOpacity={0.9}
-                  strokeWeight={selectedAreaId === area.id ? 3 : 2}
-                  fillColor={selectedAreaId === area.id ? "#3b82f6" : "#ef4444"}
-                  fillOpacity={0.13}
-                  clickable={false}
-                />
+                {(() => {
+                  const isEditing = mode === "EDITING" && selectedAreaId === area.id;
+                  const displayRadius = isEditing && liveRadius > 0 ? liveRadius : area.radiusMeters;
+                  
+                  return displayRadius != null && displayRadius > 0 ? (
+                    <Circle
+                      center={area.center}
+                      radius={displayRadius}
+                      strokeColor={isEditing ? "#3b82f6" : "#b91c1c"}
+                      strokeOpacity={0.9}
+                      strokeWeight={isEditing ? 3 : 2}
+                      fillColor={isEditing ? "#3b82f6" : "#ef4444"}
+                      fillOpacity={0.13}
+                      clickable={false}
+                    />
+                  ) : null;
+                })()}
               </React.Fragment>
             ))}
           </Map>
@@ -568,7 +506,7 @@ export default function DisasterMap() {
                           <input
                             type="number"
                             className="table-num-input"
-                            value={(area.radiusMeters ? area.radiusMeters / 1000 : 0).toFixed(3)}
+                            value={area.radiusMeters != null && area.radiusMeters !== 0 ? (area.radiusMeters / 1000).toFixed(3) : ""}
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => {
                               const val = parseFloat(e.target.value);
