@@ -374,7 +374,8 @@ export default function DisasterMap() {
 
   const mapOptions = useMemo(
     () => ({
-      restriction: { latLngBounds: INDIA_BOUNDS, strictBounds: false },
+      // Map restriction is disabled for now to allow users to explore outside India, but you can enable it if needed.
+      // restriction: { latLngBounds: INDIA_BOUNDS, strictBounds: false },
       mapTypeControl: true,
       streetViewControl: true,
       fullscreenControl: true,
