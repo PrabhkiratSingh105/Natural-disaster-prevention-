@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "OneHack — Disaster Area Selector",
-  description: "Google Maps disaster area selection interface",
+  title: "OneHack — Disaster Map",
+  description: "Google Maps disaster planning interface",
 };
 
 export default function RootLayout({ children }) {

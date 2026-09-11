@@ -57,6 +57,18 @@ http://localhost:3000
 
 Make sure your Google Cloud project has billing configured and the required Google Maps Platform services enabled for the JavaScript map you use.
 
+Enable these APIs for map display and place-name search:
+
+- Maps JavaScript API
+- Places API (New)
+
+The search uses the current Places AutocompleteSuggestion API to show matching
+place names. Choosing a result only fills the search box; it does not select,
+highlight, zoom to, or draw an area.
+
+Places and Maps Platform requests can incur billing. Use API key restrictions
+in production.
+
 For deployment, restrict the browser key to the domains/origins used by your app.
 
 ## Current interaction

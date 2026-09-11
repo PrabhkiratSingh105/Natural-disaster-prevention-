@@ -6,6 +6,7 @@ import {
   Map,
   Marker,
   Circle,
+  useMapsLibrary,
   useMap,
 } from "@vis.gl/react-google-maps";
 
@@ -67,6 +68,131 @@ function todayString() {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function PlaceSearch({ onPlaceSelect }) {
+  const places = useMapsLibrary("places");
+  const map = useMap();
+  const [query, setQuery] = useState("");
+  const [predictions, setPredictions] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedPrediction, setSelectedPrediction] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!places || query.trim().length < 2) {
+      setPredictions([]);
+      return undefined;
+    }
+
+    // Don't fetch if the user just selected this exact text from the dropdown
+    if (
+      selectedPrediction &&
+      (query === selectedPrediction.text?.toString() ||
+       query === selectedPrediction.mainText?.toString())
+    ) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setIsSearching(true);
+      places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+        input: query.trim(),
+        includedRegionCodes: ["in"],
+      })
+        .then(({ suggestions }) => {
+          setPredictions(
+            (suggestions || [])
+              .map((suggestion) => suggestion.placePrediction)
+              .filter(Boolean)
+          );
+        })
+        .catch(() => setPredictions([]))
+        .finally(() => setIsSearching(false));
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [places, query, selectedPrediction]);
+
+  function choosePrediction(prediction) {
+    const displayName = prediction.text?.toString() || prediction.mainText?.toString() || "";
+    setQuery(displayName);
+    setSelectedPrediction(prediction);
+    setPredictions([]);
+  }
+
+  async function handleSearch() {
+    if (!selectedPrediction || !places || !map) return;
+
+    setIsSubmitting(true);
+    try {
+      const placeId = selectedPrediction.placeId;
+      const displayName = query;
+
+      // Use the new Place class to fetch location details
+      const place = new places.Place({ id: placeId });
+      await place.fetchFields({ fields: ["location", "viewport"] });
+
+      const location = place.location;
+      if (location) {
+        const coords = { lat: location.lat(), lng: location.lng() };
+
+        // Always pan and zoom to the searched place reliably
+        map.panTo(coords);
+        map.setZoom(10);
+
+        // Notify parent to add the area
+        onPlaceSelect({
+          name: displayName,
+          center: coords,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch place details:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="place-search">
+      <div className="place-search-input-wrap">
+        <span aria-hidden="true">⌕</span>
+        <input
+          type="search"
+          value={query}
+          placeholder="Search a state, district, city..."
+          aria-label="Search for a geographic area"
+          onChange={(event) => {
+            setQuery(event.target.value);
+            if (selectedPrediction) setSelectedPrediction(null);
+          }}
+        />
+        {isSearching && <span className="search-spinner" aria-label="Searching" />}
+        <button
+          type="button"
+          className="search-btn"
+          disabled={!selectedPrediction || isSubmitting}
+          onClick={handleSearch}
+          title="Search and add to map"
+        >
+          {isSubmitting ? "…" : "Search"}
+        </button>
+      </div>
+      {predictions.length > 0 && (
+        <ul className="place-results">
+          {predictions.map((prediction) => (
+            <li key={prediction.placeId}>
+              <button type="button" onClick={() => choosePrediction(prediction)}>
+                <strong>{prediction.mainText?.toString() || prediction.text?.toString()}</strong>
+                <span>{prediction.secondaryText?.toString() || ""}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function MapEvents({
@@ -265,17 +391,6 @@ export default function DisasterMap() {
     }
   }
 
-  function clearAll() {
-    if (!window.confirm("Are you sure you want to clear all pins? All data will be gone and there is no way to restore it.")) {
-      return;
-    }
-    setAreas([]);
-    setCenter(null);
-    setLiveRadius(0);
-    setMode("IDLE");
-    setSelectedAreaId(null);
-  }
-
   if (!apiKey) {
     return (
       <main className="setup-screen">
@@ -290,9 +405,27 @@ export default function DisasterMap() {
   }
 
   return (
-    <APIProvider apiKey={apiKey}>
+    <APIProvider apiKey={apiKey} libraries={["places"]}>
       <main className="app">
         <section className="map-section">
+          <div className="map-search-panel">
+            <PlaceSearch
+              onPlaceSelect={({ name, center: placeCenter }) => {
+                const newId = crypto.randomUUID();
+                setAreas((prev) => [
+                  ...prev,
+                  {
+                    id: newId,
+                    name,
+                    date: selectedDate || todayString(),
+                    center: placeCenter,
+                    radiusMeters: null,
+                  },
+                ]);
+              }}
+            />
+          </div>
+
           <div className="floating-menu">
             <button
               className={`menu-item ${mode !== "IDLE" ? "active" : ""}`}
@@ -303,9 +436,6 @@ export default function DisasterMap() {
               title="Add Pin"
             >
               📍
-            </button>
-            <button className="menu-item" onClick={() => alert("Search feature coming soon!")} title="Search">
-              🔍
             </button>
             <button className="menu-item" onClick={() => alert("Submission feature coming soon!")} title="Submit">
               ✅
@@ -395,16 +525,23 @@ export default function DisasterMap() {
                     setMode("EDITING");
                   }}
                 />
-                <Circle
-                  center={area.center}
-                  radius={area.radiusMeters}
-                  strokeColor={selectedAreaId === area.id ? "#3b82f6" : "#b91c1c"}
-                  strokeOpacity={0.9}
-                  strokeWeight={selectedAreaId === area.id ? 3 : 2}
-                  fillColor={selectedAreaId === area.id ? "#3b82f6" : "#ef4444"}
-                  fillOpacity={0.13}
-                  clickable={false}
-                />
+                {(() => {
+                  const isEditing = mode === "EDITING" && selectedAreaId === area.id;
+                  const displayRadius = isEditing && liveRadius > 0 ? liveRadius : area.radiusMeters;
+                  
+                  return displayRadius != null && displayRadius > 0 ? (
+                    <Circle
+                      center={area.center}
+                      radius={displayRadius}
+                      strokeColor={isEditing ? "#3b82f6" : "#b91c1c"}
+                      strokeOpacity={0.9}
+                      strokeWeight={isEditing ? 3 : 2}
+                      fillColor={isEditing ? "#3b82f6" : "#ef4444"}
+                      fillOpacity={0.13}
+                      clickable={false}
+                    />
+                  ) : null;
+                })()}
               </React.Fragment>
             ))}
           </Map>
@@ -511,7 +648,7 @@ export default function DisasterMap() {
                           <input
                             type="number"
                             className="table-num-input"
-                            value={(area.radiusMeters ? area.radiusMeters / 1000 : 0).toFixed(3)}
+                            value={area.radiusMeters != null && area.radiusMeters !== 0 ? (area.radiusMeters / 1000).toFixed(3) : ""}
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => {
                               const val = parseFloat(e.target.value);
