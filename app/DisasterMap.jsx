@@ -17,6 +17,7 @@ const INDIA_BOUNDS = {
   east: 97.7,
   west: 68.0,
 };
+const LATEST_RAINFALL_DATE = "2024-12-31";
 
 function toRad(value) {
   return (value * Math.PI) / 180;
@@ -97,9 +98,17 @@ function findAreaAtDrop(projection, areas, dropLatLng, dropPixel) {
 function todayString() {
   const now = new Date();
   const year = now.getFullYear();
+  if (year > 2024) return LATEST_RAINFALL_DATE;
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function riskColor(risk) {
+  if (risk === "HIGH") return "#dc2626";
+  if (risk === "MEDIUM") return "#d97706";
+  if (risk === "LOW") return "#16a34a";
+  return "#b91c1c";
 }
 
 function PlaceSearch({ onPlaceSelect }) {
@@ -442,9 +451,9 @@ function SelectedBoundary({ placeIds, mapId }) {
       if (!selectedPlaceIds.has(feature.placeId)) return null;
 
       return {
-        fillColor: "#2563eb",
-        fillOpacity: 0.18,
-        strokeColor: "#1d4ed8",
+        fillColor: "#ef4444",
+        fillOpacity: 0.13,
+        strokeColor: "#b91c1c",
         strokeOpacity: 1,
         strokeWeight: 3,
       };
@@ -484,6 +493,8 @@ export default function DisasterMap() {
   const [isDraggingDelete, setIsDraggingDelete] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const [showRadiusNotice, setShowRadiusNotice] = useState(false);
+  const [isPredicting, setIsPredicting] = useState(false);
+  const [predictionError, setPredictionError] = useState("");
   const boundaryPlaceIds = useMemo(
     () => areas.map((area) => area.placeId).filter(Boolean),
     [areas]
@@ -532,6 +543,53 @@ export default function DisasterMap() {
     setAreas((prev) => prev.filter((area) => area.id !== id));
     if (selectedAreaId === id) {
       setSelectedAreaId(null);
+    }
+  }
+
+  async function runPredictions() {
+    if (areas.length === 0) {
+      setPredictionError("Add at least one area before running a prediction.");
+      return;
+    }
+
+    setIsPredicting(true);
+    setPredictionError("");
+    const apiUrl = process.env.NEXT_PUBLIC_FLOOD_API_URL || "http://127.0.0.1:5000";
+
+    try {
+      const results = await Promise.all(
+        areas.map(async (area) => {
+          const response = await fetch(`${apiUrl}/predict`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              location: area.name || "selected-area",
+              date: area.date || selectedDate || todayString(),
+              cells: [{ latitude: area.center.lat, longitude: area.center.lng }],
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload.error || `Prediction request failed (${response.status})`);
+          }
+          const prediction = payload.predictions?.[0];
+          if (!prediction) {
+            throw new Error("The prediction API returned no result for this area.");
+          }
+          return { id: area.id, prediction };
+        })
+      );
+
+      setAreas((currentAreas) =>
+        currentAreas.map((area) => {
+          const result = results.find((item) => item.id === area.id);
+          return result ? { ...area, prediction: result.prediction } : area;
+        })
+      );
+    } catch (error) {
+      setPredictionError(error.message || "Unable to reach the flood-risk API.");
+    } finally {
+      setIsPredicting(false);
     }
   }
 
@@ -599,7 +657,12 @@ export default function DisasterMap() {
             >
               📍
             </button>
-            <button className="menu-item" onClick={() => alert("Submission feature coming soon!")} title="Submit">
+            <button
+              className="menu-item"
+              onClick={runPredictions}
+              disabled={isPredicting}
+              title="Run flood-risk prediction"
+            >
               ✅
             </button>
             <button
@@ -699,10 +762,10 @@ export default function DisasterMap() {
                     <Circle
                       center={area.center}
                       radius={displayRadius}
-                      strokeColor={isEditing ? "#3b82f6" : "#b91c1c"}
+                      strokeColor={isEditing ? "#3b82f6" : riskColor(area.prediction?.risk)}
                       strokeOpacity={0.9}
                       strokeWeight={isEditing ? 3 : 2}
-                      fillColor={isEditing ? "#3b82f6" : "#ef4444"}
+                      fillColor={isEditing ? "#3b82f6" : riskColor(area.prediction?.risk)}
                       fillOpacity={0.13}
                       clickable={false}
                     />
@@ -714,8 +777,11 @@ export default function DisasterMap() {
         </section>
 
         <section className="panel">
-          
-
+          {(isPredicting || predictionError) && (
+            <div className="status" role={predictionError ? "alert" : "status"}>
+              {predictionError || "Loading flood-risk predictions..."}
+            </div>
+          )}
           {(mode === "DRAWING" || mode === "EDITING") && (
             <div className="creation-controls">
               <div className="live-stat">
@@ -751,6 +817,8 @@ export default function DisasterMap() {
                   <th>Center Longitude</th>
                   <th>Area (km²)</th>
                   <th>Radius (km)</th>
+                  <th>Risk</th>
+                  <th>Probability</th>
                   <th>Action</th>
                   <th className="collapse-indicator">{isTableCollapsed ? "Expand" : "Collapse"}</th>
                 </tr>
@@ -759,7 +827,7 @@ export default function DisasterMap() {
                 <tbody>
                   {areas.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="empty">No disaster areas created yet.</td>
+                      <td colSpan="9" className="empty">No disaster areas created yet.</td>
                     </tr>
                   ) : (
                     areas.map((area, index) => (
@@ -819,6 +887,16 @@ export default function DisasterMap() {
                         <td>{formatArea(getAreaSquareMeters(area)).km}</td>
                         <td>
                           {area.radiusMeters > 0 ? (area.radiusMeters / 1000).toFixed(3) : ""}
+                        </td>
+                        <td>
+                          {area.prediction ? (
+                            <span className={`risk-badge risk-${area.prediction.risk.toLowerCase()}`}>
+                              {area.prediction.risk}
+                            </span>
+                          ) : "-"}
+                        </td>
+                        <td>
+                          {area.prediction ? `${(area.prediction.probability * 100).toFixed(1)}%` : "-"}
                         </td>
                         <td>
                           <button
