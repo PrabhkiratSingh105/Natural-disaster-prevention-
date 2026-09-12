@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import {
   APIProvider,
   Map,
@@ -17,7 +17,74 @@ const INDIA_BOUNDS = {
   east: 97.7,
   west: 68.0,
 };
-const LATEST_RAINFALL_DATE = "2024-12-31";
+const WEATHER_TILE_MAX_ZOOM = 18;
+// Change this constant in code to tune cloud transparency.
+const CLOUD_OPACITY = 100;
+
+function CloudTileLayer({ enabled, apiKey, onTileError }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map || !enabled || !apiKey || !window.google?.maps?.Size) {
+      return undefined;
+    }
+
+    const transparentTile = (ownerDocument) => {
+      const tile = ownerDocument.createElement("div");
+      tile.style.width = "256px";
+      tile.style.height = "256px";
+      tile.style.background = "transparent";
+      return tile;
+    };
+
+    const tileLayer = {
+      tileSize: new window.google.maps.Size(256, 256),
+      minZoom: 0,
+      maxZoom: WEATHER_TILE_MAX_ZOOM,
+      name: "OpenWeather clouds",
+      alt: "OpenWeather cloud cover",
+      getTile: (coord, zoom, ownerDocument) => {
+        const tilesPerAxis = 2 ** zoom;
+        if (
+          zoom < 0 ||
+          zoom > WEATHER_TILE_MAX_ZOOM ||
+          !coord ||
+          coord.y < 0 ||
+          coord.y >= tilesPerAxis
+        ) {
+          return transparentTile(ownerDocument);
+        }
+
+        const wrappedX = ((coord.x % tilesPerAxis) + tilesPerAxis) % tilesPerAxis;
+        const tile = ownerDocument.createElement("img");
+        tile.alt = "";
+        tile.width = 256;
+        tile.height = 256;
+        tile.referrerPolicy = "no-referrer-when-downgrade";
+        tile.style.opacity = String(CLOUD_OPACITY / 100);
+        tile.onerror = () => {
+          tile.style.display = "none";
+          onTileError("provider");
+        };
+        tile.src = `https://tile.openweathermap.org/map/clouds_new/${zoom}/${wrappedX}/${coord.y}.png?appid=${encodeURIComponent(apiKey)}`;
+        return tile;
+      },
+    };
+
+    map.overlayMapTypes.insertAt(0, tileLayer);
+
+    return () => {
+      const overlays = map.overlayMapTypes;
+      for (let index = overlays.getLength() - 1; index >= 0; index -= 1) {
+        if (overlays.getAt(index) === tileLayer) {
+          overlays.removeAt(index);
+        }
+      }
+    };
+  }, [apiKey, enabled, map, onTileError]);
+
+  return null;
+}
 
 function toRad(value) {
   return (value * Math.PI) / 180;
@@ -97,11 +164,25 @@ function findAreaAtDrop(projection, areas, dropLatLng, dropPixel) {
 
 function todayString() {
   const now = new Date();
-  const year = now.getFullYear();
-  if (year > 2024) return LATEST_RAINFALL_DATE;
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
+  return formatLocalDate(now);
+}
+
+function todayTimeString() {
+  const now = new Date();
+  return formatLocalTime(now);
+}
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatLocalTime(date) {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
 }
 
 function riskColor(risk) {
@@ -481,6 +562,7 @@ export default function DisasterMap() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
   const boundariesEnabled = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BOUNDARIES_ENABLED === "true";
+  const weatherTileApiKey = process.env.NEXT_PUBLIC_WEATHER_MAP_API_KEY;
 
   // State Machine: 'IDLE' | 'PLACING' | 'DRAWING' | 'EDITING'
   const [mode, setMode] = useState("IDLE");
@@ -488,6 +570,7 @@ export default function DisasterMap() {
   const [liveRadius, setLiveRadius] = useState(0);
   const [selectedAreaId, setSelectedAreaId] = useState(null);
   const [selectedDate, setSelectedDate] = useState("");
+  const [selectedTime, setSelectedTime] = useState("");
   const [areas, setAreas] = useState([]);
   const [isTableCollapsed, setIsTableCollapsed] = useState(false);
   const [isDraggingDelete, setIsDraggingDelete] = useState(false);
@@ -495,6 +578,8 @@ export default function DisasterMap() {
   const [showRadiusNotice, setShowRadiusNotice] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
   const [predictionError, setPredictionError] = useState("");
+  const [cloudsEnabled, setCloudsEnabled] = useState(false);
+  const [cloudTileError, setCloudTileError] = useState("");
   const boundaryPlaceIds = useMemo(
     () => areas.map((area) => area.placeId).filter(Boolean),
     [areas]
@@ -502,6 +587,7 @@ export default function DisasterMap() {
 
   useEffect(() => {
     setSelectedDate(todayString());
+    setSelectedTime(todayTimeString());
   }, []);
 
   useEffect(() => {
@@ -509,6 +595,10 @@ export default function DisasterMap() {
       setSelectedAreaId(null);
     }
   }, [mode]);
+
+  const handleCloudTileError = useCallback((reason) => {
+    setCloudTileError(reason);
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -564,7 +654,9 @@ export default function DisasterMap() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               location: area.name || "selected-area",
-              date: area.date || selectedDate || todayString(),
+              date: selectedDate || area.date || todayString(),
+              time: selectedTime || todayTimeString(),
+              datetime: `${selectedDate || area.date || todayString()}T${selectedTime || todayTimeString()}`,
               cells: [{ latitude: area.center.lat, longitude: area.center.lng }],
             }),
           });
@@ -680,6 +772,53 @@ export default function DisasterMap() {
             </button>
           </div>
 
+          <div className="cloud-control">
+            <button
+              type="button"
+              className={`cloud-toggle ${cloudsEnabled ? "active" : ""}`}
+              aria-pressed={cloudsEnabled}
+              onClick={() => {
+                setCloudsEnabled((enabled) => !enabled);
+                setCloudTileError("");
+              }}
+            >
+              <span aria-hidden="true">☁️</span>
+              <span>Clouds</span>
+              <span className="cloud-state">{cloudsEnabled ? "ON" : "OFF"}</span>
+            </button>
+            <label className="cloud-timeline">
+              <span>Timeline date and time</span>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(event) => {
+                  setSelectedDate(event.target.value);
+                  setPredictionError("");
+                }}
+                aria-label="Timeline date"
+              />
+              <input
+                type="time"
+                value={selectedTime}
+                onChange={(event) => {
+                  setSelectedTime(event.target.value);
+                  setPredictionError("");
+                }}
+                aria-label="Timeline time"
+              />
+            </label>
+            {!weatherTileApiKey && (
+              <span className="cloud-help cloud-error">
+                Add NEXT_PUBLIC_WEATHER_MAP_API_KEY, then restart Next.js.
+              </span>
+            )}
+            {cloudsEnabled && cloudTileError === "provider" && (
+              <span className="cloud-help cloud-error">
+                Cloud tiles were rejected. Check that the OpenWeather key is valid and enabled.
+              </span>
+            )}
+          </div>
+
           {isDraggingDelete && (
             <div
               className="dragging-delete-icon"
@@ -697,6 +836,11 @@ export default function DisasterMap() {
             gestureHandling={mode === "DRAWING" ? "none" : "auto"}
             {...mapOptions}
           >
+            <CloudTileLayer
+              enabled={cloudsEnabled}
+              apiKey={weatherTileApiKey}
+              onTileError={handleCloudTileError}
+            />
             {boundariesEnabled && (
               <SelectedBoundary placeIds={boundaryPlaceIds} mapId={mapId} />
             )}
