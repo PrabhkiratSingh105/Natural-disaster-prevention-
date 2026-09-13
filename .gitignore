@@ -1,6 +1,16 @@
 node_modules/
 .next/
 out/
+__pycache__/
+.pytest_cache/
+generated-overlays/
+damage_map.html
+damage_map.png
+index.html
+Prediction-api/generated/
+Prediction-api/**/__pycache__/
+*.mp4
+*.pyc
 .env
 .env.local
 .env.*.local

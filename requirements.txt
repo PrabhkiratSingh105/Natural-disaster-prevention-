@@ -1,0 +1,14 @@
+Flask
+Flask-Cors
+gunicorn
+requests
+numpy
+pandas
+xarray
+matplotlib
+rioxarray
+rasterio
+folium
+h5py
+openpyxl
+torch
