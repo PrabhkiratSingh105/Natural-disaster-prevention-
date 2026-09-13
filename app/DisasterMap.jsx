@@ -757,30 +757,32 @@ export default function DisasterMap() {
     setIsSubmittingAreas(true);
     setBoundsError("");
     try {
-      setAreas((currentAreas) =>
-        currentAreas.map((area) => {
-          const viewport = area.viewport;
-          if (!viewport) return area;
-
-          const middleLat = (viewport.north + viewport.south) / 2;
-          const middleLng = (viewport.east + viewport.west) / 2;
-          return {
-            ...area,
-            extremePoints: {
-              north: { lat: viewport.north, lon: middleLng },
-              south: { lat: viewport.south, lon: middleLng },
-              east: { lat: middleLat, lon: viewport.east },
-              west: { lat: middleLat, lon: viewport.west },
-            },
-            coordinateLimits: {
-              north_lat: viewport.north,
-              south_lat: viewport.south,
-              east_lon: viewport.east,
-              west_lon: viewport.west,
-            },
-          };
+      const results = await Promise.all(
+        areas.map(async (area) => {
+          const response = await fetch("/api/bounds", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ location: area.name }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload.error) {
+            throw new Error(payload.error || `Could not find the boundary for ${area.name}.`);
+          }
+          return { id: area.id, payload };
         })
       );
+
+      setAreas((currentAreas) => currentAreas.map((area) => {
+        const result = results.find((item) => item.id === area.id);
+        return result
+          ? {
+              ...area,
+              extremePoints: result.payload.extreme_points,
+              coordinateLimits: result.payload.limits,
+              boundaryGeoJson: result.payload.geojson,
+            }
+          : area;
+      }));
     } catch (error) {
       setBoundsError(error.message || "Could not calculate the selected area's extreme points.");
     } finally {
