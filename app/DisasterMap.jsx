@@ -6,6 +6,7 @@ import {
   Map,
   Marker,
   Circle,
+  Rectangle,
   useMapsLibrary,
   useMap,
 } from "@vis.gl/react-google-maps";
@@ -121,6 +122,29 @@ function areaFromViewport(viewport) {
   return northSouth * eastWest;
 }
 
+function normalizeBounds(first, second) {
+  if (!first || !second) return null;
+  return {
+    north: Math.max(first.lat, second.lat),
+    south: Math.min(first.lat, second.lat),
+    east: Math.max(first.lng, second.lng),
+    west: Math.min(first.lng, second.lng),
+  };
+}
+
+function areaFromBounds(bounds) {
+  if (!bounds) return 0;
+  return areaFromViewport(bounds);
+}
+
+function centerFromBounds(bounds) {
+  if (!bounds) return null;
+  return {
+    lat: (bounds.north + bounds.south) / 2,
+    lng: (bounds.east + bounds.west) / 2,
+  };
+}
+
 function formatArea(areaSquareMeters) {
   return {
     km: areaSquareMeters > 0 ? (areaSquareMeters / 1_000_000).toFixed(3) : "",
@@ -131,6 +155,7 @@ function formatArea(areaSquareMeters) {
 function getAreaSquareMeters(area) {
   if (!area) return 0;
   if (area.areaSquareMeters != null) return area.areaSquareMeters;
+  if (area.bounds) return areaFromBounds(area.bounds);
   if (area.viewport) return areaFromViewport(area.viewport);
   return areaFromRadius(area.radiusMeters);
 }
@@ -141,7 +166,13 @@ function findAreaAtDrop(projection, areas, dropLatLng, dropPixel) {
 
   areas.forEach((area) => {
     const dist = distanceMeters(area.center, dropLatLng);
-    const contains = dist <= (area.radiusMeters || 0);
+    const containsCircle = dist <= (area.radiusMeters || 0);
+    const containsRectangle =
+      area.bounds &&
+      dropLatLng.lat >= area.bounds.south &&
+      dropLatLng.lat <= area.bounds.north &&
+      dropLatLng.lng >= area.bounds.west &&
+      dropLatLng.lng <= area.bounds.east;
     const pinPixel = projection.fromLatLngToContainerPixel(
       new google.maps.LatLng(area.center.lat, area.center.lng)
     );
@@ -150,9 +181,9 @@ function findAreaAtDrop(projection, areas, dropLatLng, dropPixel) {
       : Infinity;
     const onPin = pixelDist <= 28;
 
-    if (!contains && !onPin) return;
+    if (!containsCircle && !containsRectangle && !onPin) return;
 
-    const score = contains ? area.radiusMeters : dist;
+    const score = containsRectangle ? 0 : containsCircle ? area.radiusMeters : dist;
     if (score < bestScore) {
       bestScore = score;
       bestId = area.id;
@@ -371,6 +402,9 @@ function MapEvents({
   center,
   setCenter,
   setLiveRadius,
+  rectangleStart,
+  setRectangleStart,
+  setLiveBounds,
   setMode,
   selectedDate,
   setAreas,
@@ -410,6 +444,43 @@ function MapEvents({
           setLiveRadius(0);
           setMode("IDLE");
         }
+      } else if (mode === "RECTANGLE_DRAWING" || mode === "RECTANGLE_EDITING") {
+        if (!rectangleStart) {
+          setRectangleStart(coords);
+          setLiveBounds(normalizeBounds(coords, coords));
+          return;
+        }
+
+        const bounds = normalizeBounds(rectangleStart, coords);
+        const areaSquareMeters = areaFromBounds(bounds);
+        const centerPoint = centerFromBounds(bounds);
+        if (mode === "RECTANGLE_EDITING") {
+          setAreas((prev) =>
+            prev.map((area) =>
+              area.id === selectedAreaId
+                ? { ...area, bounds, center: centerPoint, areaSquareMeters }
+                : area
+            )
+          );
+          setSelectedAreaId(null);
+        } else {
+          setAreas((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              name: "",
+              shape: "rectangle",
+              date: selectedDate,
+              center: centerPoint,
+              bounds,
+              radiusMeters: null,
+              areaSquareMeters,
+            },
+          ]);
+        }
+        setRectangleStart(null);
+        setLiveBounds(null);
+        setMode("IDLE");
       } else if (mode === "EDITING") {
         const areaToEdit = areas.find((a) => a.id === selectedAreaId);
         if (areaToEdit) {
@@ -433,6 +504,11 @@ function MapEvents({
 
       if (mode === "DRAWING" && center) {
         setLiveRadius(distanceMeters(center, cursor));
+      } else if (
+        (mode === "RECTANGLE_DRAWING" || mode === "RECTANGLE_EDITING") &&
+        rectangleStart
+      ) {
+        setLiveBounds(normalizeBounds(rectangleStart, cursor));
       } else if (mode === "EDITING") {
         const areaToEdit = areas.find((a) => a.id === selectedAreaId);
         if (areaToEdit) {
@@ -445,7 +521,22 @@ function MapEvents({
       google.maps.event.removeListener(clickListener);
       google.maps.event.removeListener(moveListener);
     };
-  }, [map, mode, center, selectedDate, setCenter, setLiveRadius, setMode, setAreas, selectedAreaId, setSelectedAreaId, areas]);
+  }, [
+    map,
+    mode,
+    center,
+    selectedDate,
+    setCenter,
+    setLiveRadius,
+    rectangleStart,
+    setRectangleStart,
+    setLiveBounds,
+    setMode,
+    setAreas,
+    selectedAreaId,
+    setSelectedAreaId,
+    areas,
+  ]);
 
   return null;
 }
@@ -564,10 +655,12 @@ export default function DisasterMap() {
   const boundariesEnabled = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BOUNDARIES_ENABLED === "true";
   const weatherTileApiKey = process.env.NEXT_PUBLIC_WEATHER_MAP_API_KEY;
 
-  // State Machine: 'IDLE' | 'PLACING' | 'DRAWING' | 'EDITING'
+  // State Machine: 'IDLE' | 'PLACING' | 'DRAWING' | 'RECTANGLE_DRAWING' | 'RECTANGLE_EDITING' | 'EDITING'
   const [mode, setMode] = useState("IDLE");
   const [center, setCenter] = useState(null);
   const [liveRadius, setLiveRadius] = useState(0);
+  const [rectangleStart, setRectangleStart] = useState(null);
+  const [liveBounds, setLiveBounds] = useState(null);
   const [selectedAreaId, setSelectedAreaId] = useState(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
@@ -591,8 +684,14 @@ export default function DisasterMap() {
   }, []);
 
   useEffect(() => {
-    if (mode === "PLACING" || mode === "DRAWING") {
+    if (mode === "PLACING" || mode === "DRAWING" || mode === "RECTANGLE_DRAWING") {
       setSelectedAreaId(null);
+      setRectangleStart(null);
+      setLiveBounds(null);
+    }
+    if (mode === "IDLE") {
+      setRectangleStart(null);
+      setLiveBounds(null);
     }
   }, [mode]);
 
@@ -740,7 +839,9 @@ export default function DisasterMap() {
 
           <div className="floating-menu">
             <button
-              className={`menu-item ${mode !== "IDLE" ? "active" : ""}`}
+              className={`menu-item ${
+                ["PLACING", "DRAWING", "EDITING"].includes(mode) ? "active" : ""
+              }`}
               onClick={() => {
                 if (mode === "IDLE") setMode("PLACING");
                 else setMode("IDLE");
@@ -748,6 +849,32 @@ export default function DisasterMap() {
               title="Add Pin"
             >
               📍
+            </button>
+            <button
+              className={`menu-item ${
+                mode === "RECTANGLE_DRAWING" ? "active" : ""
+              }`}
+              onClick={() => {
+                if (mode === "RECTANGLE_DRAWING") {
+                  setMode("IDLE");
+                  setRectangleStart(null);
+                  setLiveBounds(null);
+                } else {
+                  setMode("RECTANGLE_DRAWING");
+                  setCenter(null);
+                  setLiveRadius(0);
+                }
+              }}
+              title="Add rectangle"
+            >
+              <svg
+                className="rectangle-tool-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <rect x="4" y="5" width="16" height="14" rx="1.5" />
+                <path d="M4 9h16M8 5v14" />
+              </svg>
             </button>
             <button
               className="menu-item"
@@ -833,7 +960,11 @@ export default function DisasterMap() {
             mapId={mapId}
             defaultCenter={INDIA_CENTER}
             defaultZoom={5}
-            gestureHandling={mode === "DRAWING" ? "none" : "auto"}
+            gestureHandling={
+              ["DRAWING", "RECTANGLE_DRAWING", "RECTANGLE_EDITING"].includes(mode)
+                ? "none"
+                : "auto"
+            }
             {...mapOptions}
           >
             <CloudTileLayer
@@ -855,6 +986,9 @@ export default function DisasterMap() {
               center={center}
               setCenter={setCenter}
               setLiveRadius={setLiveRadius}
+              rectangleStart={rectangleStart}
+              setRectangleStart={setRectangleStart}
+              setLiveBounds={setLiveBounds}
               setMode={setMode}
               selectedDate={selectedDate}
               setAreas={setAreas}
@@ -879,9 +1013,20 @@ export default function DisasterMap() {
                 )}
               </>
             )}
+            {liveBounds && (
+              <Rectangle
+                bounds={liveBounds}
+                strokeColor="#b91c1c"
+                strokeOpacity={0.95}
+                strokeWeight={2}
+                fillColor="#ef4444"
+                fillOpacity={0.16}
+                clickable={false}
+              />
+            )}
             {areas.map((area, index) => (
               <React.Fragment key={area.id}>
-                <Marker
+                {area.shape !== "rectangle" && <Marker
                   position={area.center}
                   title={`Pin ${index + 1}`}
                   draggable={mode === "EDITING" && selectedAreaId === area.id}
@@ -893,11 +1038,11 @@ export default function DisasterMap() {
                       });
                     }
                   }}
-                  onClick={() => {
-                    setSelectedAreaId(area.id);
-                    setMode("EDITING");
-                  }}
-                />
+                    onClick={() => {
+                      setSelectedAreaId(area.id);
+                      setMode("EDITING");
+                    }}
+                  />}
                 {(() => {
                   const isEditing = mode === "EDITING" && selectedAreaId === area.id;
                   const displayRadius = isEditing && liveRadius > 0 ? liveRadius : area.radiusMeters;
@@ -915,6 +1060,35 @@ export default function DisasterMap() {
                     />
                   ) : null;
                 })()}
+                {area.shape === "rectangle" && area.bounds && (
+                  <Rectangle
+                    bounds={area.bounds}
+                    strokeColor={
+                      mode === "RECTANGLE_EDITING" && selectedAreaId === area.id
+                        ? "#3b82f6"
+                        : riskColor(area.prediction?.risk)
+                    }
+                    strokeOpacity={0.9}
+                    strokeWeight={
+                      mode === "RECTANGLE_EDITING" && selectedAreaId === area.id
+                        ? 3
+                        : 2
+                    }
+                    fillColor={
+                      mode === "RECTANGLE_EDITING" && selectedAreaId === area.id
+                        ? "#3b82f6"
+                        : riskColor(area.prediction?.risk)
+                    }
+                    fillOpacity={0.13}
+                    clickable
+                    onClick={() => {
+                      setSelectedAreaId(area.id);
+                      setRectangleStart(null);
+                      setLiveBounds(area.bounds);
+                      setMode("RECTANGLE_EDITING");
+                    }}
+                  />
+                )}
               </React.Fragment>
             ))}
           </Map>
@@ -950,12 +1124,31 @@ export default function DisasterMap() {
               </div>
             </div>
           )}
+          {(mode === "RECTANGLE_DRAWING" || mode === "RECTANGLE_EDITING") && (
+            <div className="creation-controls">
+              <div className="live-stat">
+                <span>Rectangle</span>
+                <strong>
+                  {rectangleStart
+                    ? liveBounds
+                      ? `${liveBounds.south.toFixed(6)}, ${liveBounds.west.toFixed(6)} to ${liveBounds.north.toFixed(6)}, ${liveBounds.east.toFixed(6)}`
+                      : "Selecting second corner..."
+                    : "Select first corner"}
+                </strong>
+              </div>
+              <div className="live-stat">
+                <span>Area</span>
+                <strong>{formatArea(areaFromBounds(liveBounds)).km || "0.000"} km²</strong>
+              </div>
+            </div>
+          )}
 
           <div className={`table-wrap ${isTableCollapsed ? "collapsed" : ""}`}>
             <table>
               <thead onClick={() => setIsTableCollapsed(!isTableCollapsed)} style={{ cursor: "pointer" }}>
                 <tr className="collapsible-header">
-                  <th>Pin</th>
+                  <th>Area</th>
+                  <th>Type</th>
                   <th>Date</th>
                   <th>Center Latitude</th>
                   <th>Center Longitude</th>
@@ -971,7 +1164,7 @@ export default function DisasterMap() {
                 <tbody>
                   {areas.length === 0 ? (
                     <tr>
-                      <td colSpan="9" className="empty">No disaster areas created yet.</td>
+                      <td colSpan="11" className="empty">No disaster areas created yet.</td>
                     </tr>
                   ) : (
                     areas.map((area, index) => (
@@ -986,11 +1179,15 @@ export default function DisasterMap() {
                           <input
                             type="text"
                             className="table-text-input"
-                            value={area.name || `Pin ${index + 1}`}
+                            value={
+                              area.name ||
+                              `${area.shape === "rectangle" ? "Rectangle" : "Pin"} ${index + 1}`
+                            }
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => updateArea(area.id, { name: e.target.value })}
                           />
                         </td>
+                        <td>{area.shape === "rectangle" ? "Rectangle" : "Pin"}</td>
                         <td>
                           <input
                             type="date"
@@ -1042,7 +1239,23 @@ export default function DisasterMap() {
                         <td>
                           {area.prediction ? `${(area.prediction.probability * 100).toFixed(1)}%` : "-"}
                         </td>
-                        <td>
+                        <td className="action-cell">
+                          {area.shape === "rectangle" && (
+                            <button
+                              type="button"
+                              className="delete-btn"
+                              title="Edit rectangle"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAreaId(area.id);
+                                setRectangleStart(null);
+                                setLiveBounds(area.bounds);
+                                setMode("RECTANGLE_EDITING");
+                              }}
+                            >
+                              ✏️
+                            </button>
+                          )}
                           <button
                             className="delete-btn"
                             onClick={(e) => {
