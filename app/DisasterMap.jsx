@@ -216,13 +216,6 @@ function formatLocalTime(date) {
   return `${hours}:${minutes}`;
 }
 
-function riskColor(risk) {
-  if (risk === "HIGH") return "#dc2626";
-  if (risk === "MEDIUM") return "#d97706";
-  if (risk === "LOW") return "#16a34a";
-  return "#b91c1c";
-}
-
 function PlaceSearch({ onPlaceSelect }) {
   const places = useMapsLibrary("places");
   const map = useMap();
@@ -669,8 +662,8 @@ export default function DisasterMap() {
   const [isDraggingDelete, setIsDraggingDelete] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const [showRadiusNotice, setShowRadiusNotice] = useState(false);
-  const [isPredicting, setIsPredicting] = useState(false);
-  const [predictionError, setPredictionError] = useState("");
+  const [boundsError, setBoundsError] = useState("");
+  const [isSubmittingAreas, setIsSubmittingAreas] = useState(false);
   const [cloudsEnabled, setCloudsEnabled] = useState(false);
   const [cloudTileError, setCloudTileError] = useState("");
   const boundaryPlaceIds = useMemo(
@@ -735,52 +728,62 @@ export default function DisasterMap() {
     }
   }
 
-  async function runPredictions() {
+  async function handlePlaceSelect({ name, center: placeCenter, viewport, placeId, areaSquareMeters }) {
+    setBoundsError("");
+    const newId = crypto.randomUUID();
+    setAreas((prev) => [
+      ...prev,
+      {
+        id: newId,
+        name,
+        date: selectedDate || todayString(),
+        center: placeCenter,
+        radiusMeters: null,
+        viewport,
+        areaSquareMeters,
+        placeId,
+      },
+    ]);
+    setShowRadiusNotice(true);
+  }
+
+  async function submitSelectedAreas() {
     if (areas.length === 0) {
-      setPredictionError("Add at least one area before running a prediction.");
+      setBoundsError("Search and select an area before submitting.");
       return;
     }
 
-    setIsPredicting(true);
-    setPredictionError("");
-    const apiUrl = process.env.NEXT_PUBLIC_FLOOD_API_URL || "http://127.0.0.1:5000";
-
+    setIsSubmittingAreas(true);
+    setBoundsError("");
     try {
-      const results = await Promise.all(
-        areas.map(async (area) => {
-          const response = await fetch(`${apiUrl}/predict`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              location: area.name || "selected-area",
-              date: selectedDate || area.date || todayString(),
-              time: selectedTime || todayTimeString(),
-              datetime: `${selectedDate || area.date || todayString()}T${selectedTime || todayTimeString()}`,
-              cells: [{ latitude: area.center.lat, longitude: area.center.lng }],
-            }),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(payload.error || `Prediction request failed (${response.status})`);
-          }
-          const prediction = payload.predictions?.[0];
-          if (!prediction) {
-            throw new Error("The prediction API returned no result for this area.");
-          }
-          return { id: area.id, prediction };
-        })
-      );
-
       setAreas((currentAreas) =>
         currentAreas.map((area) => {
-          const result = results.find((item) => item.id === area.id);
-          return result ? { ...area, prediction: result.prediction } : area;
+          const viewport = area.viewport;
+          if (!viewport) return area;
+
+          const middleLat = (viewport.north + viewport.south) / 2;
+          const middleLng = (viewport.east + viewport.west) / 2;
+          return {
+            ...area,
+            extremePoints: {
+              north: { lat: viewport.north, lon: middleLng },
+              south: { lat: viewport.south, lon: middleLng },
+              east: { lat: middleLat, lon: viewport.east },
+              west: { lat: middleLat, lon: viewport.west },
+            },
+            coordinateLimits: {
+              north_lat: viewport.north,
+              south_lat: viewport.south,
+              east_lon: viewport.east,
+              west_lon: viewport.west,
+            },
+          };
         })
       );
     } catch (error) {
-      setPredictionError(error.message || "Unable to reach the flood-risk API.");
+      setBoundsError(error.message || "Could not calculate the selected area's extreme points.");
     } finally {
-      setIsPredicting(false);
+      setIsSubmittingAreas(false);
     }
   }
 
@@ -802,25 +805,7 @@ export default function DisasterMap() {
       <main className="app">
         <section className="map-section">
           <div className="map-search-panel">
-            <PlaceSearch
-              onPlaceSelect={({ name, center: placeCenter, viewport, placeId, areaSquareMeters }) => {
-                const newId = crypto.randomUUID();
-                setAreas((prev) => [
-                  ...prev,
-                  {
-                    id: newId,
-                    name,
-                    date: selectedDate || todayString(),
-                    center: placeCenter,
-                    radiusMeters: null,
-                    viewport,
-                    areaSquareMeters,
-                    placeId,
-                  },
-                ]);
-                setShowRadiusNotice(true);
-              }}
-            />
+            <PlaceSearch onPlaceSelect={handlePlaceSelect} />
           </div>
 
           {showRadiusNotice && (
@@ -877,10 +862,11 @@ export default function DisasterMap() {
               </svg>
             </button>
             <button
+              type="button"
               className="menu-item"
-              onClick={runPredictions}
-              disabled={isPredicting}
-              title="Run flood-risk prediction"
+              onClick={submitSelectedAreas}
+              disabled={isSubmittingAreas}
+              title="Submit selected area and show extreme points"
             >
               ✅
             </button>
@@ -920,7 +906,6 @@ export default function DisasterMap() {
                 value={selectedDate}
                 onChange={(event) => {
                   setSelectedDate(event.target.value);
-                  setPredictionError("");
                 }}
                 aria-label="Timeline date"
               />
@@ -929,7 +914,6 @@ export default function DisasterMap() {
                 value={selectedTime}
                 onChange={(event) => {
                   setSelectedTime(event.target.value);
-                  setPredictionError("");
                 }}
                 aria-label="Timeline time"
               />
@@ -1043,6 +1027,17 @@ export default function DisasterMap() {
                       setMode("EDITING");
                     }}
                   />}
+                {area.extremePoints && (
+                  <>
+                    {Object.entries(area.extremePoints).map(([direction, point]) => (
+                      <Marker
+                        key={`${area.id}-${direction}`}
+                        position={{ lat: point.lat, lng: point.lon }}
+                        title={`${direction} extreme: ${point.lat}, ${point.lon}`}
+                      />
+                    ))}
+                  </>
+                )}
                 {(() => {
                   const isEditing = mode === "EDITING" && selectedAreaId === area.id;
                   const displayRadius = isEditing && liveRadius > 0 ? liveRadius : area.radiusMeters;
@@ -1051,10 +1046,10 @@ export default function DisasterMap() {
                     <Circle
                       center={area.center}
                       radius={displayRadius}
-                      strokeColor={isEditing ? "#3b82f6" : riskColor(area.prediction?.risk)}
+                      strokeColor={isEditing ? "#3b82f6" : "#10b981"}
                       strokeOpacity={0.9}
                       strokeWeight={isEditing ? 3 : 2}
-                      fillColor={isEditing ? "#3b82f6" : riskColor(area.prediction?.risk)}
+                      fillColor={isEditing ? "#3b82f6" : "#10b981"}
                       fillOpacity={0.13}
                       clickable={false}
                     />
@@ -1066,7 +1061,7 @@ export default function DisasterMap() {
                     strokeColor={
                       mode === "RECTANGLE_EDITING" && selectedAreaId === area.id
                         ? "#3b82f6"
-                        : riskColor(area.prediction?.risk)
+                        : "#10b981"
                     }
                     strokeOpacity={0.9}
                     strokeWeight={
@@ -1077,7 +1072,7 @@ export default function DisasterMap() {
                     fillColor={
                       mode === "RECTANGLE_EDITING" && selectedAreaId === area.id
                         ? "#3b82f6"
-                        : riskColor(area.prediction?.risk)
+                        : "#10b981"
                     }
                     fillOpacity={0.13}
                     clickable
@@ -1095,9 +1090,9 @@ export default function DisasterMap() {
         </section>
 
         <section className="panel">
-          {(isPredicting || predictionError) && (
-            <div className="status" role={predictionError ? "alert" : "status"}>
-              {predictionError || "Loading flood-risk predictions..."}
+          {boundsError && (
+            <div className="status" role="alert">
+              {boundsError}
             </div>
           )}
           {(mode === "DRAWING" || mode === "EDITING") && (
@@ -1154,8 +1149,10 @@ export default function DisasterMap() {
                   <th>Center Longitude</th>
                   <th>Area (km²)</th>
                   <th>Radius (km)</th>
-                  <th>Risk</th>
-                  <th>Probability</th>
+                  <th>North Point</th>
+                  <th>South Point</th>
+                  <th>East Point</th>
+                  <th>West Point</th>
                   <th>Action</th>
                   <th className="collapse-indicator">{isTableCollapsed ? "Expand" : "Collapse"}</th>
                 </tr>
@@ -1164,7 +1161,7 @@ export default function DisasterMap() {
                 <tbody>
                   {areas.length === 0 ? (
                     <tr>
-                      <td colSpan="11" className="empty">No disaster areas created yet.</td>
+                      <td colSpan="13" className="empty">No disaster areas created yet.</td>
                     </tr>
                   ) : (
                     areas.map((area, index) => (
@@ -1229,16 +1226,16 @@ export default function DisasterMap() {
                         <td>
                           {area.radiusMeters > 0 ? (area.radiusMeters / 1000).toFixed(3) : ""}
                         </td>
-                        <td>
-                          {area.prediction ? (
-                            <span className={`risk-badge risk-${area.prediction.risk.toLowerCase()}`}>
-                              {area.prediction.risk}
-                            </span>
-                          ) : "-"}
-                        </td>
-                        <td>
-                          {area.prediction ? `${(area.prediction.probability * 100).toFixed(1)}%` : "-"}
-                        </td>
+                        {[
+                          area.extremePoints?.north,
+                          area.extremePoints?.south,
+                          area.extremePoints?.east,
+                          area.extremePoints?.west,
+                        ].map((point, pointIndex) => (
+                          <td className="coordinate-limits" key={`${area.id}-point-${pointIndex}`}>
+                            {point ? `${point.lat.toFixed(6)}, ${point.lon.toFixed(6)}` : "-"}
+                          </td>
+                        ))}
                         <td className="action-cell">
                           {area.shape === "rectangle" && (
                             <button
