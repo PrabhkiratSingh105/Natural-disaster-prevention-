@@ -10,6 +10,7 @@ import {
   useMapsLibrary,
   useMap,
 } from "@vis.gl/react-google-maps";
+import GradientCircle from "./GradientCircle";
 
 const INDIA_CENTER = { lat: 22.5937, lng: 78.9629 };
 const INDIA_BOUNDS = {
@@ -995,6 +996,11 @@ export default function DisasterMap() {
               selectedAreaId={selectedAreaId}
               setSelectedAreaId={setSelectedAreaId}
               areas={areas}
+            />
+            <GradientCircle
+              latitude={INDIA_CENTER.lat}
+              longitude={INDIA_CENTER.lng}
+              radius={250000}
             />
             {center && (
               <>
