@@ -786,7 +786,7 @@ export default function DisasterMap() {
               <span>Clouds</span>
               <span className="cloud-state">{cloudsEnabled ? "ON" : "OFF"}</span>
             </button>
-            <label className="cloud-timeline">
+            {/*<label className="cloud-timeline">
               <span>Timeline date and time</span>
               <input
                 type="date"
@@ -806,7 +806,7 @@ export default function DisasterMap() {
                 }}
                 aria-label="Timeline time"
               />
-            </label>
+            </label>*/}
             {!weatherTileApiKey && (
               <span className="cloud-help cloud-error">
                 Add NEXT_PUBLIC_WEATHER_MAP_API_KEY, then restart Next.js.
